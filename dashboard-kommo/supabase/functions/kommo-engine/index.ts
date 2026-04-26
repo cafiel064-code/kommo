@@ -11,11 +11,9 @@ const DEFAULT_TAG = "IA-PPT";
 
 // IDs dos campos personalizados na Kommo
 const FIELD_IDS = {
-  STATUS_REUNIAO: 1724498,   // Compareceu?
-  CADENCIA: 0,               // Não encontrado
-  RECUPERACAO: 0,            // Não encontrado
-  SITUACAO: 1724504,         // Venda Realizada?
-  CLOSER: 1790641,           // Responsável Atendimento
+  VENDA: 1724504,
+  COMPARECEU: 1724498,
+  RESPONSAVEL: 1790641,
 };
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";

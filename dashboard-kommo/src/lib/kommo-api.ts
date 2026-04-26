@@ -80,11 +80,9 @@ export const IA_TAG = "IA-PPT";
 
 // IDs dos campos (espelhados da Edge Function)
 export const FIELD_IDS = {
-  STATUS_REUNIAO: 1724498,   // Compareceu?
-  CADENCIA: 0,               // Não encontrado
-  RECUPERACAO: 0,            // Não encontrado
-  SITUACAO: 1724504,         // Venda Realizada?
-  CLOSER: 1790641,           // Responsável Atendimento
+  VENDA: 1724504,
+  COMPARECEU: 1724498,
+  RESPONSAVEL: 1790641,
 };
 
 export interface FieldEvent {
