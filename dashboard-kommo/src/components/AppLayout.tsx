@@ -21,7 +21,7 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
             <Activity className="w-4 h-4 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold tracking-tight text-white">PSI Terapia</h1>
+            <h1 className="text-base font-bold tracking-tight text-white">CRM Euro</h1>
             <p className="text-[10px] text-white/60">Dashboard CRM</p>
           </div>
         </div>
@@ -54,7 +54,7 @@ function SidebarContent({ onNav }: { onNav?: () => void }) {
 
       {/* Footer */}
       <div className="p-3 border-t border-sidebar-border">
-        <p className="text-[10px] text-white/40 text-center">PSI Terapia no Exterior</p>
+        <p className="text-[10px] text-white/40 text-center">CRM Euro</p>
       </div>
     </div>
   );
@@ -84,7 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarContent onNav={() => setOpen(false)} />
             </SheetContent>
           </Sheet>
-          <h1 className="text-sm font-bold text-white">PSI Terapia</h1>
+          <h1 className="text-sm font-bold text-white">CRM Euro</h1>
         </header>
 
         {/* Content */}
