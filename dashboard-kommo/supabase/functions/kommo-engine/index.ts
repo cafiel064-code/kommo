@@ -132,7 +132,7 @@ async function fetchLeadsByPeriod(
 ): Promise<{ leads: any[]; debug: string }> {
   const allLeads: any[] = [];
   const limit = 250;
-  const maxPages = 20;
+  const maxPages = 200;
 
   for (let page = 1; page <= maxPages; page++) {
     const path =
@@ -359,10 +359,12 @@ serve(async (req) => {
     // ── Fetch leads ──
     if (action === "fetch_leads") {
       const now = Math.floor(Date.now() / 1000);
-      const thirtyDaysAgo = now - 30 * 86400;
 
-      const dateFrom = body.date_from ?? thirtyDaysAgo;
-      const dateTo = body.date_to ?? now;
+// 01/01/2020 como início geral do CRM
+const crmStart = Math.floor(new Date("2020-01-01T00:00:00Z").getTime() / 1000);
+
+const dateFrom = body.date_from ?? crmStart;
+const dateTo = body.date_to ?? now;
 
       const leadsResult = await fetchLeadsByPeriod(
         subdomain,

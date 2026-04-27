@@ -54,7 +54,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const connected = isConnected();
 
-  const [filtro, setFiltro] = useState<"hoje" | "ontem" | "7d" | "30d" | "todos">("todos");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
@@ -67,8 +68,18 @@ export default function Dashboard() {
   const [visibleResponsavel, setVisibleResponsavel] = useState(100);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["dashboard-data"],
-    queryFn: fetchDashboardData,
+    queryKey: ["dashboard-data", dateFrom, dateTo],
+queryFn: () => {
+  const fromTimestamp = dateFrom
+    ? Math.floor(new Date(`${dateFrom}T00:00:00`).getTime() / 1000)
+    : undefined;
+
+  const toTimestamp = dateTo
+    ? Math.floor(new Date(`${dateTo}T23:59:59`).getTime() / 1000)
+    : undefined;
+
+  return fetchDashboardData(fromTimestamp, toTimestamp);
+},
     enabled: connected,
     retry: 1,
     staleTime: 2 * 60 * 1000,
@@ -307,38 +318,35 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Tabs
-            value={filtro}
-            onValueChange={(v) => {
-              setFiltro(v as typeof filtro);
-              setVisibleLeads(100);
-              setVisibleVendas(100);
-              setVisibleNaoCompareceu(100);
-              setVisibleResponsavel(100);
-              setLeadsOpen(false);
-              setVendasOpen(false);
-              setNaoCompareceuOpen(false);
-              setResponsavelOpen(false);
-            }}
-          >
-            <TabsList className="h-8 sm:h-9">
-              <TabsTrigger value="hoje" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Hoje
-              </TabsTrigger>
-              <TabsTrigger value="ontem" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Ontem
-              </TabsTrigger>
-              <TabsTrigger value="7d" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                7d
-              </TabsTrigger>
-              <TabsTrigger value="30d" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                30d
-              </TabsTrigger>
-              <TabsTrigger value="todos" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Todos
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-2">
+  <input
+    type="date"
+    value={dateFrom}
+    onChange={(e) => setDateFrom(e.target.value)}
+    className="h-9 rounded-md border px-3 text-xs bg-background"
+  />
+
+  <span className="text-xs text-muted-foreground">até</span>
+
+  <input
+    type="date"
+    value={dateTo}
+    onChange={(e) => setDateTo(e.target.value)}
+    className="h-9 rounded-md border px-3 text-xs bg-background"
+  />
+
+  <Button
+    size="sm"
+    variant="outline"
+    onClick={() => {
+      setDateFrom("");
+      setDateTo("");
+    }}
+    className="h-9"
+  >
+    Todos
+  </Button>
+</div>
 
           <Button
             size="sm"

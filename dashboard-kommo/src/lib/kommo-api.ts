@@ -97,7 +97,7 @@ export interface TagDeletedEvent {
   created_at: number;
 }
 
-export async function fetchDashboardData(): Promise<{
+export async function fetchDashboardData(dateFrom?: number, dateTo?: number): Promise<{
   leads: KommoLead[];
   lostTagLeads: KommoLead[];
   pipelines: KommoPipeline[];
@@ -107,7 +107,12 @@ export async function fetchDashboardData(): Promise<{
   tag: string;
   totalFetched: number;
 }> {
-  const res = await callEngine("crm_data", { tag: IA_TAG });
+  const res = await callEngine("crm_data", {
+    tag: IA_TAG,
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
+
   const leads = (res.leads ?? []) as KommoLead[];
   const lostTagLeads = ((res as any).lostTagLeads ?? []) as KommoLead[];
   const pipelines = (res.pipelines ?? []) as KommoPipeline[];
@@ -116,6 +121,7 @@ export async function fetchDashboardData(): Promise<{
   const tagDeletedEvents = ((res as any).tagDeletedEvents ?? []) as TagDeletedEvent[];
   const tag = (res as any).tag ?? IA_TAG;
   const totalFetched = (res as any).totalFetched ?? leads.length;
+
   return { leads, lostTagLeads, pipelines, kpis: kpis as DashboardKPIs, events, tagDeletedEvents, tag, totalFetched };
 }
 
