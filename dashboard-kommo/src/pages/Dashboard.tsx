@@ -32,15 +32,9 @@ const FIELD_IDS = {
 const ATENDENTES = ["Ana Paula", "Rayanne"];
 
 function getFieldValueById(lead: KommoLead, fieldId: number): string | null {
-  const field = lead.custom_fields_values?.find(
-    (f: any) => f.field_id === fieldId
-  );
-
+  const field = lead.custom_fields_values?.find((f: any) => f.field_id === fieldId);
   const value = field?.values?.[0]?.value;
-
-  if (!value) return null;
-
-  return String(value).trim();
+  return value ? String(value).trim() : null;
 }
 
 function formatCurrency(value: number) {
@@ -55,7 +49,6 @@ export default function Dashboard() {
   const connected = isConnected();
 
   const [filtro, setFiltro] = useState<"hoje" | "ontem" | "7d" | "30d" | "todos">("todos");
-
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
   const [naoCompareceuOpen, setNaoCompareceuOpen] = useState(false);
@@ -79,10 +72,7 @@ export default function Dashboard() {
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
         <Zap className="w-10 h-10 text-psi-wine" />
         <h2 className="text-xl font-bold">Conecte sua Kommo</h2>
-        <Button
-          onClick={() => navigate("/integracoes")}
-          className="bg-primary text-primary-foreground"
-        >
+        <Button onClick={() => navigate("/integracoes")} className="bg-primary text-primary-foreground">
           <ArrowRight className="w-4 h-4 mr-2" />
           Ir para Integrações
         </Button>
@@ -117,6 +107,7 @@ export default function Dashboard() {
   if (!data) return null;
 
   const allLeads: KommoLead[] = data.leads ?? [];
+  const vendaEvents = (data as any).vendaEvents ?? [];
 
   function filterByCreatedAt(lead: KommoLead): boolean {
     if (!lead.created_at) return false;
@@ -128,18 +119,37 @@ export default function Dashboard() {
     switch (filtro) {
       case "hoje":
         return createdAt >= todayStart.getTime();
-
       case "ontem": {
         const ontemStart = todayStart.getTime() - 86400000;
         return createdAt >= ontemStart && createdAt < todayStart.getTime();
       }
-
       case "7d":
         return createdAt >= todayStart.getTime() - 7 * 86400000;
-
       case "30d":
         return createdAt >= todayStart.getTime() - 30 * 86400000;
+      default:
+        return true;
+    }
+  }
 
+  function eventInPeriod(event: any): boolean {
+    if (!event.created_at) return false;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const eventAt = event.created_at * 1000;
+
+    switch (filtro) {
+      case "hoje":
+        return eventAt >= todayStart.getTime();
+      case "ontem": {
+        const ontemStart = todayStart.getTime() - 86400000;
+        return eventAt >= ontemStart && eventAt < todayStart.getTime();
+      }
+      case "7d":
+        return eventAt >= todayStart.getTime() - 7 * 86400000;
+      case "30d":
+        return eventAt >= todayStart.getTime() - 30 * 86400000;
       default:
         return true;
     }
@@ -147,9 +157,13 @@ export default function Dashboard() {
 
   const leads = filtro === "todos" ? allLeads : allLeads.filter(filterByCreatedAt);
 
-  const vendas = leads.filter(
-    (lead) => getFieldValueById(lead, FIELD_IDS.VENDA) === "Sim"
+  const vendaEventsFiltrados = vendaEvents.filter(eventInPeriod);
+
+  const vendaLeadIds = new Set(
+    vendaEventsFiltrados.map((event: any) => event.entity_id)
   );
+
+  const vendas = allLeads.filter((lead) => vendaLeadIds.has(lead.id));
 
   const totalVendasValor = vendas.reduce(
     (acc, lead) => acc + Number(lead.price || 0),
@@ -160,12 +174,26 @@ export default function Dashboard() {
     (lead) => getFieldValueById(lead, FIELD_IDS.COMPARECEU) === "Não"
   );
 
-  const compareceu = leads.filter(
-    (lead) => getFieldValueById(lead, FIELD_IDS.COMPARECEU) === "Sim"
-  );
-
   const taxaConversao =
     leads.length > 0 ? Math.round((vendas.length / leads.length) * 100) : 0;
+
+  function getVendaEventByLeadId(leadId: number) {
+    return vendaEventsFiltrados.find((event: any) => event.entity_id === leadId);
+  }
+
+  function leadDate(lead: KommoLead) {
+    return lead.created_at
+      ? new Date(lead.created_at * 1000).toLocaleDateString("pt-BR")
+      : "—";
+  }
+
+  function vendaDate(lead: KommoLead) {
+    const vendaEvent = getVendaEventByLeadId(lead.id);
+
+    return vendaEvent?.created_at
+      ? new Date(vendaEvent.created_at * 1000).toLocaleString("pt-BR")
+      : leadDate(lead);
+  }
 
   const porResponsavel: Record<
     string,
@@ -174,7 +202,6 @@ export default function Dashboard() {
       vendas: KommoLead[];
       valor: number;
       naoCompareceu: KommoLead[];
-      compareceu: KommoLead[];
     }
   > = {};
 
@@ -184,7 +211,6 @@ export default function Dashboard() {
       vendas: [],
       valor: 0,
       naoCompareceu: [],
-      compareceu: [],
     };
   }
 
@@ -198,34 +224,35 @@ export default function Dashboard() {
         vendas: [],
         valor: 0,
         naoCompareceu: [],
-        compareceu: [],
       };
     }
 
     porResponsavel[responsavel].leads.push(lead);
 
-    if (getFieldValueById(lead, FIELD_IDS.VENDA) === "Sim") {
-      porResponsavel[responsavel].vendas.push(lead);
-      porResponsavel[responsavel].valor += Number(lead.price || 0);
-    }
-
     if (getFieldValueById(lead, FIELD_IDS.COMPARECEU) === "Não") {
       porResponsavel[responsavel].naoCompareceu.push(lead);
     }
-
-    if (getFieldValueById(lead, FIELD_IDS.COMPARECEU) === "Sim") {
-      porResponsavel[responsavel].compareceu.push(lead);
-    }
   }
 
-  function leadDate(lead: KommoLead) {
-    return lead.created_at
-      ? new Date(lead.created_at * 1000).toLocaleDateString("pt-BR")
-      : "—";
+  for (const lead of vendas) {
+    const responsavel =
+      getFieldValueById(lead, FIELD_IDS.RESPONSAVEL) || "Sem responsável";
+
+    if (!porResponsavel[responsavel]) {
+      porResponsavel[responsavel] = {
+        leads: [],
+        vendas: [],
+        valor: 0,
+        naoCompareceu: [],
+      };
+    }
+
+    porResponsavel[responsavel].vendas.push(lead);
+    porResponsavel[responsavel].valor += Number(lead.price || 0);
   }
 
   function renderLeadBadges(lead: KommoLead) {
-    const venda = getFieldValueById(lead, FIELD_IDS.VENDA);
+    const venda = vendaLeadIds.has(lead.id);
     const comparecimento = getFieldValueById(lead, FIELD_IDS.COMPARECEU);
     const responsavel = getFieldValueById(lead, FIELD_IDS.RESPONSAVEL);
 
@@ -237,7 +264,7 @@ export default function Dashboard() {
           </Badge>
         )}
 
-        {venda === "Sim" && (
+        {venda && (
           <Badge className="bg-green-100 text-green-700 text-[10px]">
             Venda realizada
           </Badge>
@@ -264,7 +291,7 @@ export default function Dashboard() {
     );
   }
 
-  function renderLeadList(list: KommoLead[], visible: number) {
+  function renderLeadList(list: KommoLead[], visible: number, mode: "lead" | "venda" = "lead") {
     return (
       <div className="space-y-1.5">
         {list.slice(0, visible).map((lead) => (
@@ -285,7 +312,11 @@ export default function Dashboard() {
                   {formatCurrency(lead.price)}
                 </span>
               )}
-              <span>{leadDate(lead)}</span>
+
+              <span>
+                {mode === "venda" ? `Venda: ${vendaDate(lead)}` : leadDate(lead)}
+              </span>
+
               <span className="text-[10px] text-muted-foreground/50">
                 #{lead.id}
               </span>
@@ -322,21 +353,11 @@ export default function Dashboard() {
             }}
           >
             <TabsList className="h-8 sm:h-9">
-              <TabsTrigger value="hoje" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Hoje
-              </TabsTrigger>
-              <TabsTrigger value="ontem" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Ontem
-              </TabsTrigger>
-              <TabsTrigger value="7d" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                7d
-              </TabsTrigger>
-              <TabsTrigger value="30d" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                30d
-              </TabsTrigger>
-              <TabsTrigger value="todos" className="text-[10px] sm:text-xs px-2 sm:px-3">
-                Todos
-              </TabsTrigger>
+              <TabsTrigger value="hoje" className="text-[10px] sm:text-xs px-2 sm:px-3">Hoje</TabsTrigger>
+              <TabsTrigger value="ontem" className="text-[10px] sm:text-xs px-2 sm:px-3">Ontem</TabsTrigger>
+              <TabsTrigger value="7d" className="text-[10px] sm:text-xs px-2 sm:px-3">7d</TabsTrigger>
+              <TabsTrigger value="30d" className="text-[10px] sm:text-xs px-2 sm:px-3">30d</TabsTrigger>
+              <TabsTrigger value="todos" className="text-[10px] sm:text-xs px-2 sm:px-3">Todos</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -381,11 +402,7 @@ export default function Dashboard() {
                   </p>
                 </div>
               </div>
-              <ChevronDown
-                className={`w-5 h-5 text-muted-foreground transition-transform ${
-                  leadsOpen ? "rotate-180" : ""
-                }`}
-              />
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${leadsOpen ? "rotate-180" : ""}`} />
             </div>
           </CardContent>
         </Card>
@@ -417,11 +434,7 @@ export default function Dashboard() {
                   </p>
                 </div>
               </div>
-              <ChevronDown
-                className={`w-5 h-5 text-muted-foreground transition-transform ${
-                  vendasOpen ? "rotate-180" : ""
-                }`}
-              />
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${vendasOpen ? "rotate-180" : ""}`} />
             </div>
           </CardContent>
         </Card>
@@ -453,11 +466,7 @@ export default function Dashboard() {
                   </p>
                 </div>
               </div>
-              <ChevronDown
-                className={`w-5 h-5 text-muted-foreground transition-transform ${
-                  naoCompareceuOpen ? "rotate-180" : ""
-                }`}
-              />
+              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${naoCompareceuOpen ? "rotate-180" : ""}`} />
             </div>
           </CardContent>
         </Card>
@@ -520,7 +529,7 @@ export default function Dashboard() {
           <CardContent>
             {vendas.length > 0 ? (
               <>
-                {renderLeadList(vendas, visibleVendas)}
+                {renderLeadList(vendas, visibleVendas, "venda")}
 
                 {visibleVendas < vendas.length && (
                   <div className="flex justify-center pt-4">
@@ -565,8 +574,7 @@ export default function Dashboard() {
                       onClick={() => setVisibleNaoCompareceu((prev) => prev + 100)}
                       className="text-red-600 border-red-200 hover:bg-red-50"
                     >
-                      Ver mais (
-                      {Math.min(100, naoCompareceu.length - visibleNaoCompareceu)} leads)
+                      Ver mais ({Math.min(100, naoCompareceu.length - visibleNaoCompareceu)} leads)
                     </Button>
                   </div>
                 )}
@@ -598,7 +606,7 @@ export default function Dashboard() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {Object.entries(porResponsavel)
-              .filter(([, dados]) => dados.leads.length > 0)
+              .filter(([, dados]) => dados.leads.length > 0 || dados.vendas.length > 0)
               .map(([nome, dados]) => (
                 <div
                   key={nome}
@@ -621,11 +629,7 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    <ChevronDown
-                      className={`w-5 h-5 text-purple-600 transition-transform ${
-                        responsavelOpen === nome ? "rotate-180" : ""
-                      }`}
-                    />
+                    <ChevronDown className={`w-5 h-5 text-purple-600 transition-transform ${responsavelOpen === nome ? "rotate-180" : ""}`} />
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mt-4 text-center">
