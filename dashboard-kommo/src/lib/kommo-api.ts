@@ -107,11 +107,14 @@ export async function fetchDashboardData(dateFrom?: number, dateTo?: number): Pr
   tag: string;
   totalFetched: number;
 }> {
-  const res = await callEngine("crm_data", {
+  const res = await callEngine(
+  "crm_data",
+  {
     tag: IA_TAG,
     date_from: dateFrom,
     date_to: dateTo,
-  });
+  } as any
+);
 
   const leads = (res.leads ?? []) as KommoLead[];
   const lostTagLeads = ((res as any).lostTagLeads ?? []) as KommoLead[];
