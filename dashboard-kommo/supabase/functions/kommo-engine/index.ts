@@ -7,11 +7,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// IDs reais do seu CRM Kommo
 const FIELD_IDS = {
-  VENDA: 1724504, // Venda Realizada?
-  COMPARECEU: 1724498, // Compareceu?
-  RESPONSAVEL: 1790641, // Responsável Atendimento
+  VENDA: 1724504,
+  COMPARECEU: 1724498,
+  RESPONSAVEL: 1790641,
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -41,7 +40,6 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-// ── Kommo API helper ──
 async function kommoFetch(
   subdomain: string,
   token: string,
@@ -79,7 +77,6 @@ async function kommoFetch(
   return { ok: res.ok, status: res.status, data, text };
 }
 
-// ── Pega valor de campo personalizado por ID ──
 function getFieldValueById(lead: any, fieldId: number): string | null {
   const field = lead.custom_fields_values?.find(
     (f: any) => f.field_id === fieldId
@@ -92,7 +89,6 @@ function getFieldValueById(lead: any, fieldId: number): string | null {
   return String(value).trim();
 }
 
-// ── Fetch pipelines ──
 async function fetchPipelines(subdomain: string, token: string): Promise<any[]> {
   const res = await kommoFetch(subdomain, token, "/leads/pipelines");
 
@@ -107,7 +103,6 @@ async function fetchPipelines(subdomain: string, token: string): Promise<any[]> 
   return res.data?._embedded?.pipelines ?? [];
 }
 
-// ── Fetch custom fields definitions ──
 async function fetchCustomFields(
   subdomain: string,
   token: string
@@ -123,7 +118,6 @@ async function fetchCustomFields(
   return res.data?._embedded?.custom_fields ?? [];
 }
 
-// ── Buscar leads por período de criação ──
 async function fetchLeadsByPeriod(
   subdomain: string,
   token: string,
@@ -169,7 +163,6 @@ async function fetchLeadsByPeriod(
   };
 }
 
-// ── Salvar snapshot dos leads no Supabase ──
 async function saveLeadSnapshots(leads: any[]) {
   if (leads.length === 0) return;
 
@@ -180,11 +173,9 @@ async function saveLeadSnapshots(leads: any[]) {
     lead_name: lead.name || `Lead #${lead.id}`,
     pipeline_id: lead.pipeline_id,
     status_id: lead.status_id,
-
     venda_realizada: getFieldValueById(lead, FIELD_IDS.VENDA),
     compareceu: getFieldValueById(lead, FIELD_IDS.COMPARECEU),
     responsavel: getFieldValueById(lead, FIELD_IDS.RESPONSAVEL),
-
     price: lead.price || 0,
     snapshot_date: new Date().toISOString().split("T")[0],
   }));
@@ -200,7 +191,6 @@ async function saveLeadSnapshots(leads: any[]) {
   }
 }
 
-// ── Calcular KPIs reais do seu CRM ──
 function computeRealKPIs(leads: any[]) {
   const leadsCriados = leads.length;
 
@@ -266,29 +256,25 @@ function computeRealKPIs(leads: any[]) {
   });
 
   const taxaConversao =
-    leadsCriados > 0 ? Number(((vendas.length / leadsCriados) * 100).toFixed(2)) : 0;
+    leadsCriados > 0
+      ? Number(((vendas.length / leadsCriados) * 100).toFixed(2))
+      : 0;
 
   return {
     leadsCriados,
     totalLeads: leadsCriados,
-
     vendasQuantidade: vendas.length,
     totalVendas,
     taxaConversao,
-
     compareceu,
     naoCompareceu,
     acompanhandoComparecimento,
-
     porResponsavel,
-
-    // ainda não implementado neste ciclo
     followUpsPorResponsavel: {},
     tempoMedioResposta: null,
   };
 }
 
-// ── Main handler ──
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -305,7 +291,6 @@ serve(async (req) => {
       );
     }
 
-    // ── Testar conexão ──
     if (action === "test_connection") {
       const res = await kommoFetch(subdomain, api_token, "/account");
 
@@ -327,7 +312,6 @@ serve(async (req) => {
       });
     }
 
-    // ── Listar custom fields ──
     if (action === "list_custom_fields") {
       const fields = await fetchCustomFields(subdomain, api_token);
 
@@ -346,7 +330,6 @@ serve(async (req) => {
       });
     }
 
-    // ── Fetch pipelines ──
     if (action === "fetch_pipelines") {
       const pipelines = await fetchPipelines(subdomain, api_token);
 
@@ -356,15 +339,12 @@ serve(async (req) => {
       });
     }
 
-    // ── Fetch leads ──
     if (action === "fetch_leads") {
       const now = Math.floor(Date.now() / 1000);
+      const defaultStart = 0;
 
-// 01/01/2020 como início geral do CRM
-const crmStart = Math.floor(new Date("2020-01-01T00:00:00Z").getTime() / 1000);
-
-const dateFrom = body.date_from ?? crmStart;
-const dateTo = body.date_to ?? now;
+      const dateFrom = body.date_from ?? defaultStart;
+      const dateTo = body.date_to ?? now;
 
       const leadsResult = await fetchLeadsByPeriod(
         subdomain,
@@ -381,12 +361,11 @@ const dateTo = body.date_to ?? now;
       });
     }
 
-    // ── CRM Data principal do dashboard ──
     if (action === "crm_data") {
       const now = Math.floor(Date.now() / 1000);
-      const thirtyDaysAgo = now - 30 * 86400;
+      const defaultStart = 0;
 
-      const dateFrom = body.date_from ?? thirtyDaysAgo;
+      const dateFrom = body.date_from ?? defaultStart;
       const dateTo = body.date_to ?? now;
 
       const [leadsResult, pipelines] = await Promise.all([
