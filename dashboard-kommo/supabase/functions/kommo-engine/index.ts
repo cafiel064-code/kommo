@@ -47,15 +47,24 @@ async function kommoFetch(
 ): Promise<{ ok: boolean; status: number; data: any; text: string }> {
   const url = `https://${subdomain}.kommo.com/api/v4${path}`;
 
-  let res: Response;
-
   try {
-    res = await fetch(url, {
+    const res = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
     });
+
+    const text = await res.text();
+
+    let data = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // resposta não veio em JSON
+    }
+
+    return { ok: res.ok, status: res.status, data, text };
   } catch (e) {
     return {
       ok: false,
@@ -64,17 +73,6 @@ async function kommoFetch(
       text: `Erro de rede: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
-
-  const text = await res.text();
-
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    // resposta não veio em JSON
-  }
-
-  return { ok: res.ok, status: res.status, data, text };
 }
 
 function getFieldValueById(lead: any, fieldId: number): string | null {
@@ -124,42 +122,61 @@ async function fetchLeadsByPeriod(
   dateFrom: number,
   dateTo: number
 ): Promise<{ leads: any[]; debug: string }> {
-  const allLeads: any[] = [];
+  const leadMap = new Map<number, any>();
+
   const limit = 250;
   const maxPages = 200;
 
-  for (let page = 1; page <= maxPages; page++) {
-    const path =
-      `/leads?limit=${limit}` +
-      `&page=${page}` +
-      `&filter[created_at][from]=${dateFrom}` +
-      `&filter[created_at][to]=${dateTo}` +
-      `&order[created_at]=desc`;
+  const modes: Array<"created_at" | "updated_at"> = ["created_at", "updated_at"];
 
-    const res = await kommoFetch(subdomain, token, path);
+  for (const mode of modes) {
+    for (let page = 1; page <= maxPages; page++) {
+      const path =
+        `/leads?limit=${limit}` +
+        `&page=${page}` +
+        `&filter[${mode}][from]=${dateFrom}` +
+        `&filter[${mode}][to]=${dateTo}` +
+        `&order[${mode}]=desc`;
 
-    if (res.status === 204) break;
+      const res = await kommoFetch(subdomain, token, path);
 
-    if (!res.ok || !res.data) {
-      throw new Error(
-        `Erro ao buscar leads (${res.status}): ${
-          res.data?.detail || res.text.substring(0, 200)
-        }`
-      );
+      if (res.status === 204) break;
+
+      if (!res.ok || !res.data) {
+        throw new Error(
+          `Erro ao buscar leads por ${mode} (${res.status}): ${
+            res.data?.detail || res.text.substring(0, 200)
+          }`
+        );
+      }
+
+      const leads = res.data?._embedded?.leads ?? [];
+
+      if (leads.length === 0) break;
+
+      for (const lead of leads) {
+        leadMap.set(lead.id, lead);
+      }
+
+      if (leads.length < limit) break;
     }
-
-    const leads = res.data?._embedded?.leads ?? [];
-
-    if (leads.length === 0) break;
-
-    allLeads.push(...leads);
-
-    if (leads.length < limit) break;
   }
+
+  const allLeads = Array.from(leadMap.values()).sort(
+    (a, b) => (b.created_at || 0) - (a.created_at || 0)
+  );
+
+  const newest = allLeads[0]?.created_at
+    ? new Date(allLeads[0].created_at * 1000).toLocaleDateString("pt-BR")
+    : "sem data";
+
+  const oldest = allLeads[allLeads.length - 1]?.created_at
+    ? new Date(allLeads[allLeads.length - 1].created_at * 1000).toLocaleDateString("pt-BR")
+    : "sem data";
 
   return {
     leads: allLeads,
-    debug: `${allLeads.length} leads encontrados no período.`,
+    debug: `${allLeads.length} leads encontrados. Mais recente: ${newest}. Mais antigo: ${oldest}.`,
   };
 }
 
