@@ -14,9 +14,7 @@ async function callEngine(
 ): Promise<KommoEngineResponse> {
   const creds = getCredentials();
 
-  if (!creds) {
-    throw new Error("Sem credenciais Kommo configuradas");
-  }
+  if (!creds) throw new Error("Sem credenciais Kommo configuradas");
 
   if (!isSupabaseConfigured()) {
     throw new Error(
@@ -24,7 +22,7 @@ async function callEngine(
     );
   }
 
-  const body: KommoEngineRequest = {
+  const body: any = {
     action,
     subdomain: creds.subdomain,
     api_token: creds.apiToken,
@@ -69,7 +67,7 @@ export async function testConnection(): Promise<{
   account?: { id: number; name: string };
   error?: string;
 }> {
-  return callEngine("test_connection") as any;
+  return callEngine("test_connection");
 }
 
 export async function fetchLeads(): Promise<KommoLead[]> {
@@ -81,6 +79,12 @@ export async function fetchPipelines(): Promise<KommoPipeline[]> {
   const res = await callEngine("fetch_pipelines");
   return (res.pipelines ?? []) as KommoPipeline[];
 }
+
+export const FIELD_IDS = {
+  VENDA: 1724504,
+  COMPARECEU: 1724498,
+  RESPONSAVEL: 1790641,
+};
 
 export async function fetchDashboardData(params?: {
   date_from?: number;
@@ -117,9 +121,3 @@ export async function fetchDashboardData(params?: {
     totalVendas: Number((res as any).totalVendas ?? 0),
   };
 }
-
-export const FIELD_IDS = {
-  VENDA: 1724504,
-  COMPARECEU: 1724498,
-  RESPONSAVEL: 1790641,
-};

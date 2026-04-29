@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import type { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { DateRange } from "react-day-picker";
 import {
   AlertCircle,
   CalendarIcon,
@@ -22,9 +22,9 @@ import { fetchDashboardData, FIELD_IDS } from "@/lib/kommo-api";
 import { isConnected } from "@/lib/kommo-storage";
 import type { KommoLead } from "@/types/kommo";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
@@ -72,9 +72,7 @@ function toUnix(date: Date) {
 }
 
 function getCalendarLabel(dateRange: DateRange | undefined) {
-  if (!dateRange?.from && !dateRange?.to) {
-    return "Toda existência do CRM";
-  }
+  if (!dateRange?.from && !dateRange?.to) return "Toda existência do CRM";
 
   if (dateRange?.from && !dateRange?.to) {
     return format(dateRange.from, "dd/MM/yyyy", { locale: ptBR });
@@ -94,6 +92,7 @@ export default function Dashboard() {
   const connected = isConnected();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
   const [naoCompareceuOpen, setNaoCompareceuOpen] = useState(false);
@@ -194,22 +193,15 @@ export default function Dashboard() {
 
   function leadInSelectedPeriod(lead: KommoLead): boolean {
     if (!lead.created_at) return false;
-
-    const createdAt = Number(lead.created_at);
-
-    return createdAt >= dateFrom && createdAt <= dateTo;
+    return Number(lead.created_at) >= dateFrom && Number(lead.created_at) <= dateTo;
   }
 
   function eventInSelectedPeriod(event: any): boolean {
     if (!event.created_at) return false;
-
-    const eventAt = Number(event.created_at);
-
-    return eventAt >= dateFrom && eventAt <= dateTo;
+    return Number(event.created_at) >= dateFrom && Number(event.created_at) <= dateTo;
   }
 
   const leads = allLeads.filter(leadInSelectedPeriod);
-
   const vendaEventsFiltrados = vendaEvents.filter(eventInSelectedPeriod);
 
   const vendaLeadIds = new Set(
@@ -220,19 +212,20 @@ export default function Dashboard() {
     vendaLeadIds.has(Number(lead.id))
   );
 
-  const vendas = vendasPorEvento.length > 0 ? vendasPorEvento : vendaLeadsBackend;
+  const vendasBase =
+    vendasPorEvento.length > 0 ? vendasPorEvento : vendaLeadsBackend;
 
-  const vendasUnicas = useMemo(() => {
+  const vendas = useMemo(() => {
     const map = new Map<number, KommoLead>();
 
-    for (const lead of vendas) {
+    for (const lead of vendasBase) {
       map.set(Number(lead.id), lead);
     }
 
     return Array.from(map.values());
-  }, [vendas]);
+  }, [vendasBase]);
 
-  const totalVendasValor = vendasUnicas.reduce(
+  const totalVendasValor = vendas.reduce(
     (acc, lead) => acc + Number(lead.price || 0),
     0
   );
@@ -242,9 +235,7 @@ export default function Dashboard() {
   );
 
   const taxaConversao =
-    leads.length > 0
-      ? Math.round((vendasUnicas.length / leads.length) * 100)
-      : 0;
+    leads.length > 0 ? Math.round((vendas.length / leads.length) * 100) : 0;
 
   function getVendaEventByLeadId(leadId: number) {
     return vendaEventsFiltrados.find(
@@ -307,7 +298,7 @@ export default function Dashboard() {
     }
   }
 
-  for (const lead of vendasUnicas) {
+  for (const lead of vendas) {
     const responsavel =
       getFieldValueById(lead, FIELD_IDS.RESPONSAVEL) || "Sem responsável";
 
@@ -325,7 +316,7 @@ export default function Dashboard() {
   }
 
   function renderLeadBadges(lead: KommoLead) {
-    const venda = vendasUnicas.some((item) => Number(item.id) === Number(lead.id));
+    const venda = vendas.some((item) => Number(item.id) === Number(lead.id));
     const comparecimento = getFieldValueById(lead, FIELD_IDS.COMPARECEU);
     const responsavel = getFieldValueById(lead, FIELD_IDS.RESPONSAVEL);
 
@@ -431,11 +422,7 @@ export default function Dashboard() {
             </PopoverContent>
           </Popover>
 
-          <Button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="gap-2"
-          >
+          <Button onClick={() => refetch()} disabled={isFetching} className="gap-2">
             {isFetching ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -490,7 +477,7 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{vendasUnicas.length}</p>
+            <p className="text-3xl font-bold">{vendas.length}</p>
             <p className="text-sm text-green-600">
               {formatCurrency(totalVendasValor)}
             </p>
@@ -514,9 +501,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{naoCompareceu.length}</p>
-            <p className="text-sm text-muted-foreground">
-              No período selecionado
-            </p>
+            <p className="text-sm text-muted-foreground">No período selecionado</p>
           </CardContent>
         </Card>
 
@@ -530,7 +515,7 @@ export default function Dashboard() {
           <CardContent>
             <p className="text-3xl font-bold">{taxaConversao}%</p>
             <p className="text-sm text-muted-foreground">
-              {vendasUnicas.length} vendas de {leads.length} leads
+              {vendas.length} vendas de {leads.length} leads
             </p>
           </CardContent>
         </Card>
@@ -563,22 +548,22 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleVendas, vendasUnicas.length)} de{" "}
-              {vendasUnicas.length} vendas
+              Mostrando {Math.min(visibleVendas, vendas.length)} de{" "}
+              {vendas.length} vendas
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {vendasUnicas.length > 0 ? (
+            {vendas.length > 0 ? (
               <>
-                {renderLeadList(vendasUnicas, visibleVendas, "venda")}
+                {renderLeadList(vendas, visibleVendas, "venda")}
 
-                {visibleVendas < vendasUnicas.length && (
+                {visibleVendas < vendas.length && (
                   <Button
                     variant="outline"
                     onClick={() => setVisibleVendas((prev) => prev + 100)}
                   >
-                    Ver mais (
-                    {Math.min(100, vendasUnicas.length - visibleVendas)} vendas)
+                    Ver mais ({Math.min(100, vendas.length - visibleVendas)}{" "}
+                    vendas)
                   </Button>
                 )}
               </>
@@ -595,8 +580,8 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)}{" "}
-              de {naoCompareceu.length} leads que não compareceram
+              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)} de{" "}
+              {naoCompareceu.length} leads que não compareceram
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -612,10 +597,7 @@ export default function Dashboard() {
                     }
                   >
                     Ver mais (
-                    {Math.min(
-                      100,
-                      naoCompareceu.length - visibleNaoCompareceu
-                    )}{" "}
+                    {Math.min(100, naoCompareceu.length - visibleNaoCompareceu)}{" "}
                     leads)
                   </Button>
                 )}
@@ -643,17 +625,14 @@ export default function Dashboard() {
         <CardContent className="space-y-3">
           {Object.entries(porResponsavel)
             .filter(
-              ([, dados]) =>
-                dados.leads.length > 0 || dados.vendas.length > 0
+              ([, dados]) => dados.leads.length > 0 || dados.vendas.length > 0
             )
             .map(([nome, dados]) => (
               <div key={nome} className="rounded-lg border p-4 space-y-3">
                 <button
                   className="w-full flex items-center justify-between text-left"
                   onClick={() => {
-                    setResponsavelOpen(
-                      responsavelOpen === nome ? false : nome
-                    );
+                    setResponsavelOpen(responsavelOpen === nome ? false : nome);
                     setVisibleResponsavel(100);
                   }}
                 >
@@ -675,9 +654,7 @@ export default function Dashboard() {
 
                   <div>
                     <p className="text-muted-foreground">Valor</p>
-                    <p className="font-semibold">
-                      {formatCurrency(dados.valor)}
-                    </p>
+                    <p className="font-semibold">{formatCurrency(dados.valor)}</p>
                   </div>
 
                   <div>
@@ -706,10 +683,7 @@ export default function Dashboard() {
                         }
                       >
                         Ver mais (
-                        {Math.min(
-                          100,
-                          dados.leads.length - visibleResponsavel
-                        )}{" "}
+                        {Math.min(100, dados.leads.length - visibleResponsavel)}{" "}
                         leads)
                       </Button>
                     )}
