@@ -77,7 +77,7 @@ async function kommoFetch(
 
 function getFieldValueById(lead: any, fieldId: number): string | null {
   const field = lead.custom_fields_values?.find(
-    (f: any) => f.field_id === fieldId
+    (f: any) => Number(f.field_id) === Number(fieldId)
   );
 
   const value = field?.values?.[0]?.value;
@@ -157,7 +157,7 @@ async function fetchLeadsByPeriod(
       if (leads.length === 0) break;
 
       for (const lead of leads) {
-        leadMap.set(lead.id, lead);
+        leadMap.set(Number(lead.id), lead);
       }
 
       if (leads.length < limit) break;
@@ -173,15 +173,57 @@ async function fetchLeadsByPeriod(
     : "sem data";
 
   const oldest = allLeads[allLeads.length - 1]?.created_at
-    ? new Date(allLeads[allLeads.length - 1].created_at * 1000).toLocaleDateString(
-        "pt-BR"
-      )
+    ? new Date(
+        allLeads[allLeads.length - 1].created_at * 1000
+      ).toLocaleDateString("pt-BR")
     : "sem data";
 
   return {
     leads: allLeads,
     debug: `${allLeads.length} leads encontrados. Mais recente: ${newest}. Mais antigo: ${oldest}.`,
   };
+}
+
+async function fetchLeadsByStatus(
+  subdomain: string,
+  token: string,
+  pipelineId: number,
+  statusId: number
+): Promise<any[]> {
+  const leads: any[] = [];
+  const limit = 250;
+  const maxPages = 200;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const path =
+      `/leads?limit=${limit}` +
+      `&page=${page}` +
+      `&filter[statuses][0][pipeline_id]=${pipelineId}` +
+      `&filter[statuses][0][status_id]=${statusId}` +
+      `&order[updated_at]=desc`;
+
+    const res = await kommoFetch(subdomain, token, path);
+
+    if (res.status === 204) break;
+
+    if (!res.ok || !res.data) {
+      throw new Error(
+        `Erro ao buscar leads por status (${res.status}): ${
+          res.data?.detail || res.text.substring(0, 200)
+        }`
+      );
+    }
+
+    const pageLeads = res.data?._embedded?.leads ?? [];
+
+    if (pageLeads.length === 0) break;
+
+    leads.push(...pageLeads);
+
+    if (pageLeads.length < limit) break;
+  }
+
+  return leads;
 }
 
 async function fetchStatusEvents(
@@ -200,6 +242,7 @@ async function fetchStatusEvents(
       `&page=${page}` +
       `&filter[created_at][from]=${dateFrom}` +
       `&filter[created_at][to]=${dateTo}` +
+      `&filter[type_code][]=14` +
       `&order[created_at]=desc`;
 
     const res = await kommoFetch(subdomain, token, path);
@@ -207,11 +250,8 @@ async function fetchStatusEvents(
     if (res.status === 204) break;
 
     if (!res.ok || !res.data) {
-      throw new Error(
-        `Erro ao buscar eventos (${res.status}): ${
-          res.data?.detail || res.text.substring(0, 200)
-        }`
-      );
+      console.log("Erro ao buscar eventos:", res.status, res.text);
+      break;
     }
 
     const pageEvents = res.data?._embedded?.events ?? [];
@@ -226,16 +266,79 @@ async function fetchStatusEvents(
   return events;
 }
 
-function getVendaStatusId(pipelines: any[]): number | null {
-  const statuses = pipelines.flatMap((pipeline: any) => {
-    return pipeline._embedded?.statuses ?? [];
-  });
+function normalizeText(value: string): string {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
 
-  const found = statuses.find((status: any) => {
-    return String(status.name).trim().toUpperCase() === "VENDA REALIZADA";
-  });
+function getVendaStatusInfo(
+  pipelines: any[]
+): { pipelineId: number; statusId: number; statusName: string } | null {
+  for (const pipeline of pipelines) {
+    const statuses = pipeline._embedded?.statuses ?? [];
 
-  return found?.id ?? null;
+    for (const status of statuses) {
+      const statusName = normalizeText(status.name);
+
+      if (
+        statusName === "VENDA REALIZADA" ||
+        statusName.includes("VENDA REALIZADA")
+      ) {
+        return {
+          pipelineId: Number(pipeline.id),
+          statusId: Number(status.id),
+          statusName: String(status.name),
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function deepFindStatusId(obj: any): number | null {
+  if (!obj || typeof obj !== "object") return null;
+
+  if (typeof obj.id !== "undefined" && String(obj.name || "").length > 0) {
+    return Number(obj.id);
+  }
+
+  const possibleKeys = [
+    "status_id",
+    "lead_status_id",
+    "pipeline_status_id",
+    "id",
+  ];
+
+  for (const key of possibleKeys) {
+    if (typeof obj[key] !== "undefined") {
+      const value = Number(obj[key]);
+      if (!Number.isNaN(value)) return value;
+    }
+  }
+
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+
+    if (key === "lead_status" || key === "status") {
+      const found =
+        Number(value?.id) ||
+        Number(value?.status_id) ||
+        Number(value?.lead_status_id);
+
+      if (found) return found;
+    }
+
+    if (typeof value === "object") {
+      const found = deepFindStatusId(value);
+      if (found) return found;
+    }
+  }
+
+  return null;
 }
 
 function getLeadStatusAfter(event: any): number | null {
@@ -244,43 +347,20 @@ function getLeadStatusAfter(event: any): number | null {
 
     if (Array.isArray(valueAfter)) {
       for (const item of valueAfter) {
-        const statusId =
-          item?.lead_status?.id ??
-          item?.lead_status_id ??
-          item?.status_id ??
-          item?.value?.lead_status?.id ??
-          item?.value?.status_id ??
-          item?.value?.lead_status_id;
-
-        if (statusId) return Number(statusId);
+        const found = deepFindStatusId(item);
+        if (found) return Number(found);
       }
     }
 
-    const statusId =
-      valueAfter?.lead_status?.id ??
-      valueAfter?.lead_status_id ??
-      valueAfter?.status_id ??
-      valueAfter?.value?.lead_status?.id ??
-      valueAfter?.value?.status_id ??
-      valueAfter?.value?.lead_status_id ??
-      event?.value?.lead_status?.id ??
-      event?.value?.status_id ??
-      event?.value?.lead_status_id;
+    const found =
+      deepFindStatusId(valueAfter) ||
+      deepFindStatusId(event?.value) ||
+      deepFindStatusId(event);
 
-    return statusId ? Number(statusId) : null;
+    return found ? Number(found) : null;
   } catch {
     return null;
   }
-}
-
-function getEventUser(event: any): string {
-  return (
-    event.created_by_name ||
-    event.modified_by_name ||
-    event.author?.name ||
-    event.account?.name ||
-    "Usuário não identificado"
-  );
 }
 
 async function saveLeadSnapshots(leads: any[]) {
@@ -311,6 +391,17 @@ async function saveLeadSnapshots(leads: any[]) {
   }
 }
 
+function getUniqueLeadsById(leads: any[]): any[] {
+  const map = new Map<number, any>();
+
+  for (const lead of leads) {
+    if (!lead?.id) continue;
+    map.set(Number(lead.id), lead);
+  }
+
+  return Array.from(map.values());
+}
+
 function getUniqueVendaEvents(vendaEvents: any[]): any[] {
   const seenLeadIds = new Set<number>();
   const uniqueEvents: any[] = [];
@@ -327,25 +418,18 @@ function getUniqueVendaEvents(vendaEvents: any[]): any[] {
   return uniqueEvents;
 }
 
-function computeRealKPIs(leads: any[], vendaEvents: any[] = []) {
+function leadDentroDoPeriodo(lead: any, dateFrom: number, dateTo: number) {
+  const updatedAt = Number(lead.updated_at || 0);
+  const closedAt = Number(lead.closed_at || 0);
+
+  return (
+    (updatedAt >= dateFrom && updatedAt <= dateTo) ||
+    (closedAt >= dateFrom && closedAt <= dateTo)
+  );
+}
+
+function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
   const leadsCriados = leads.length;
-
-  const leadMap = new Map<number, any>();
-  for (const lead of leads) {
-    leadMap.set(Number(lead.id), lead);
-  }
-
-  const vendaEventsUnique = getUniqueVendaEvents(vendaEvents);
-
-  const vendasLeads = vendaEventsUnique
-    .map((event) => leadMap.get(Number(event.entity_id)))
-    .filter(Boolean);
-
-  const vendasFallback = leads.filter((lead: any) => {
-    return getFieldValueById(lead, FIELD_IDS.VENDA) === "Sim";
-  });
-
-  const vendasUsadas = vendasLeads.length > 0 ? vendasLeads : vendasFallback;
 
   const totalVendas = vendasUsadas.reduce((acc: number, lead: any) => {
     return acc + Number(lead.price || 0);
@@ -432,7 +516,7 @@ function computeRealKPIs(leads: any[], vendaEvents: any[] = []) {
     naoCompareceu,
     acompanhandoComparecimento,
     porResponsavel,
-    vendasPorEventoQuantidade: vendaEventsUnique.length,
+    vendasPorEventoQuantidade: vendasUsadas.length,
     followUpsPorResponsavel: {},
     tempoMedioResposta: null,
   };
@@ -539,21 +623,29 @@ serve(async (req) => {
         fetchStatusEvents(subdomain, api_token, dateFrom, dateTo),
       ]);
 
-      const vendaStatusId = getVendaStatusId(pipelines);
+      const vendaStatusInfo = getVendaStatusInfo(pipelines);
 
-      const vendaEvents = vendaStatusId
-        ? statusEvents.filter((event: any) => {
-            return getLeadStatusAfter(event) === vendaStatusId;
-          })
-        : [];
+      if (!vendaStatusInfo) {
+        return jsonResponse({
+          success: false,
+          error: "Etapa Venda Realizada não encontrada nos funis da Kommo.",
+          pipelinesDebug: pipelines.map((pipeline: any) => ({
+            pipeline_id: pipeline.id,
+            pipeline_name: pipeline.name,
+            statuses: pipeline._embedded?.statuses?.map((status: any) => ({
+              id: status.id,
+              name: status.name,
+            })),
+          })),
+        });
+      }
+
+      const vendaEvents = statusEvents.filter((event: any) => {
+        const statusAfter = getLeadStatusAfter(event);
+        return Number(statusAfter) === Number(vendaStatusInfo.statusId);
+      });
 
       const vendaEventsUnique = getUniqueVendaEvents(vendaEvents);
-
-      const allStatusIds = new Set(
-        statusEvents
-          .map((event: any) => getLeadStatusAfter(event))
-          .filter(Boolean)
-      );
 
       const leadMap = new Map<number, any>();
 
@@ -561,36 +653,88 @@ serve(async (req) => {
         leadMap.set(Number(lead.id), lead);
       });
 
-      const vendaLeads = vendaEventsUnique
+      const vendaLeadsPorEvento = vendaEventsUnique
         .map((event: any) => leadMap.get(Number(event.entity_id)))
         .filter(Boolean);
 
-      const totalVendas = vendaLeads.reduce((acc: number, lead: any) => {
+      const vendaLeadsPorStatus = await fetchLeadsByStatus(
+        subdomain,
+        api_token,
+        vendaStatusInfo.pipelineId,
+        vendaStatusInfo.statusId
+      );
+
+      const vendaLeadsPorStatusNoPeriodo = vendaLeadsPorStatus.filter(
+        (lead: any) => leadDentroDoPeriodo(lead, dateFrom, dateTo)
+      );
+
+      const vendasUsadas =
+        vendaLeadsPorEvento.length > 0
+          ? vendaLeadsPorEvento
+          : vendaLeadsPorStatusNoPeriodo;
+
+      const vendasUnicas = getUniqueLeadsById(vendasUsadas);
+
+      const totalVendas = vendasUnicas.reduce((acc: number, lead: any) => {
         return acc + Number(lead.price || 0);
       }, 0);
 
       const kpis = {
-        ...computeRealKPIs(leadsResult.leads, vendaEventsUnique),
-        vendasQuantidade: vendaLeads.length,
+        ...computeRealKPIs(leadsResult.leads, vendasUnicas),
+        vendasQuantidade: vendasUnicas.length,
         totalVendas,
       };
+
+      const statusIdsEncontrados = Array.from(
+        new Set(
+          statusEvents
+            .map((event: any) => getLeadStatusAfter(event))
+            .filter(Boolean)
+        )
+      );
 
       return jsonResponse({
         success: true,
         leads: leadsResult.leads,
         pipelines,
         kpis,
-        vendaStatusId,
+
+        vendaStatusId: vendaStatusInfo.statusId,
+        vendaPipelineId: vendaStatusInfo.pipelineId,
+        vendaStatusName: vendaStatusInfo.statusName,
+
         vendaEvents,
         vendaEventsUnique,
         vendaEventsQuantidade: vendaEvents.length,
         vendaEventsUnicosQuantidade: vendaEventsUnique.length,
-        vendaLeads,
+
+        vendaLeadsPorEvento,
+        vendaLeadsPorEventoQuantidade: vendaLeadsPorEvento.length,
+
+        vendaLeadsPorStatus,
+        vendaLeadsPorStatusQuantidade: vendaLeadsPorStatus.length,
+
+        vendaLeadsPorStatusNoPeriodo,
+        vendaLeadsPorStatusNoPeriodoQuantidade:
+          vendaLeadsPorStatusNoPeriodo.length,
+
+        vendaLeads: vendasUnicas,
         totalFetched: leadsResult.leads.length,
+
         statusEventsQuantidade: statusEvents.length,
         statusEventsDebug: statusEvents.slice(0, 5),
-        statusIdsEncontrados: Array.from(allStatusIds),
-        debug: `${leadsResult.debug} | eventos encontrados: ${statusEvents.length} | vendaStatusId: ${vendaStatusId} | vendas por movimentação: ${vendaEventsUnique.length} | total vendas: ${totalVendas}`,
+        statusIdsEncontrados,
+
+        totalVendas,
+
+        debug:
+          `${leadsResult.debug} | ` +
+          `eventos de status encontrados: ${statusEvents.length} | ` +
+          `vendaStatusId: ${vendaStatusInfo.statusId} | ` +
+          `vendas por evento: ${vendaLeadsPorEvento.length} | ` +
+          `vendas por status no período: ${vendaLeadsPorStatusNoPeriodo.length} | ` +
+          `vendas usadas: ${vendasUnicas.length} | ` +
+          `total vendas: ${totalVendas}`,
       });
     }
 
