@@ -5,18 +5,15 @@ export type CloudTalkCallsByUser = {
   user: string;
   inbound: number;
   outbound: number;
-  unknown?: number;
   total: number;
 };
 
 export type CloudTalkCallsResponse = {
   success: boolean;
-  calls: any[];
   callsByUser: CloudTalkCallsByUser[];
   totals: {
     inbound: number;
     outbound: number;
-    unknown?: number;
     total: number;
   };
   totalFetched: number;
@@ -72,15 +69,5 @@ export async function fetchCloudTalkCallsByUser(params?: {
     throw new Error(json.error || "Erro ao buscar chamadas da CloudTalk");
   }
 
-  return {
-    ...json,
-    calls: json.calls ?? [],
-    callsByUser: json.callsByUser ?? [],
-    totals: json.totals ?? {
-      inbound: 0,
-      outbound: 0,
-      unknown: 0,
-      total: 0,
-    },
-  };
+  return json;
 }

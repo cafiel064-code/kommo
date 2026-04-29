@@ -7,8 +7,6 @@ import {
   DollarSign,
   Loader2,
   PhoneCall,
-  PhoneIncoming,
-  PhoneOutgoing,
   RefreshCw,
   TrendingUp,
   UserCheck,
@@ -132,16 +130,11 @@ export default function Dashboard() {
   const [naoCompareceuOpen, setNaoCompareceuOpen] = useState(false);
   const [responsavelOpen, setResponsavelOpen] = useState<string | false>(false);
 
-  const [cloudTalkUserOpen, setCloudTalkUserOpen] = useState<string | false>(
-    false
-  );
-
   const [visibleLeads, setVisibleLeads] = useState(100);
   const [visibleVendas, setVisibleVendas] = useState(100);
   const [visibleAgendados, setVisibleAgendados] = useState(100);
   const [visibleNaoCompareceu, setVisibleNaoCompareceu] = useState(100);
   const [visibleResponsavel, setVisibleResponsavel] = useState(100);
-  const [visibleCloudTalkCalls, setVisibleCloudTalkCalls] = useState(50);
 
   const dateFrom = allTime ? 0 : dateInputToUnixStart(dateFromInput);
   const dateTo = allTime
@@ -203,14 +196,11 @@ export default function Dashboard() {
     setVisibleAgendados(100);
     setVisibleNaoCompareceu(100);
     setVisibleResponsavel(100);
-    setVisibleCloudTalkCalls(50);
-
     setLeadsOpen(false);
     setVendasOpen(false);
     setAgendadosOpen(false);
     setNaoCompareceuOpen(false);
     setResponsavelOpen(false);
-    setCloudTalkUserOpen(false);
   }
 
   function aplicarUltimosSeteDias() {
@@ -556,153 +546,9 @@ export default function Dashboard() {
     );
   }
 
-  function getCloudTalkCdr(call: any) {
-    return call?.Cdr ?? call?.cdr ?? call;
-  }
-
-  function getCloudTalkCallUserName(call: any): string {
-    const cdr = getCloudTalkCdr(call);
-
-    const candidates = [
-      call?.User?.name,
-      call?.User?.full_name,
-      call?.User?.email,
-      call?.user?.name,
-      call?.user?.full_name,
-      call?.user?.email,
-
-      call?.Agent?.name,
-      call?.Agent?.full_name,
-      call?.Agent?.email,
-      call?.agent?.name,
-      call?.agent?.full_name,
-      call?.agent?.email,
-
-      cdr?.user_name,
-      cdr?.user_full_name,
-      cdr?.user_email,
-      cdr?.agent_name,
-      cdr?.agent_full_name,
-      cdr?.agent_email,
-      cdr?.operator_name,
-      cdr?.employee_name,
-    ];
-
-    for (const candidate of candidates) {
-      if (
-        candidate &&
-        typeof candidate !== "object" &&
-        String(candidate).trim()
-      ) {
-        return String(candidate).trim();
-      }
-    }
-
-    if (cdr?.user_id) return `Usuário #${cdr.user_id}`;
-
-    return "Usuário não identificado";
-  }
-
-  function getCloudTalkDirection(call: any): "inbound" | "outbound" | "unknown" {
-    const cdr = getCloudTalkCdr(call);
-
-    const raw = String(cdr?.type || cdr?.direction || "")
-      .toLowerCase()
-      .trim();
-
-    if (raw.includes("incoming") || raw.includes("inbound")) return "inbound";
-    if (raw.includes("outgoing") || raw.includes("outbound")) return "outbound";
-
-    return "unknown";
-  }
-
-  function getCloudTalkDirectionLabel(call: any) {
-    const direction = getCloudTalkDirection(call);
-
-    if (direction === "inbound") return "Inbound";
-    if (direction === "outbound") return "Outbound";
-
-    return "Desconhecida";
-  }
-
-  function getCloudTalkExternalNumber(call: any) {
-    const cdr = getCloudTalkCdr(call);
-
-    return (
-      cdr?.public_external ||
-      cdr?.external_number ||
-      cdr?.external ||
-      cdr?.number ||
-      cdr?.phone_number ||
-      "—"
-    );
-  }
-
-  function getCloudTalkInternalNumber(call: any) {
-    const cdr = getCloudTalkCdr(call);
-
-    return (
-      cdr?.public_internal ||
-      cdr?.internal_number ||
-      cdr?.internal ||
-      cdr?.line ||
-      "—"
-    );
-  }
-
-  function getCloudTalkCallDate(call: any) {
-    const cdr = getCloudTalkCdr(call);
-    const value = cdr?.started_at || cdr?.created_at || cdr?.date;
-
-    if (!value) return "—";
-
-    return new Date(value).toLocaleString("pt-BR");
-  }
-
-  function getCloudTalkDuration(call: any) {
-    const cdr = getCloudTalkCdr(call);
-
-    const seconds = Number(
-      cdr?.talking_time || cdr?.billsec || cdr?.duration || 0
-    );
-
-    if (!seconds) return "0s";
-
-    const minutes = Math.floor(seconds / 60);
-    const rest = seconds % 60;
-
-    if (minutes <= 0) return `${rest}s`;
-
-    return `${minutes}min ${rest}s`;
-  }
-
-  function getCloudTalkStatus(call: any) {
-    const cdr = getCloudTalkCdr(call);
-
-    if (cdr?.answered_at) return "Atendida";
-
-    if (
-      String(cdr?.is_voicemail) === "true" ||
-      String(cdr?.is_voicemail) === "1"
-    ) {
-      return "Voicemail";
-    }
-
-    return "Não atendida";
-  }
-
-  function getCloudTalkCallsByUserName(userName: string) {
-    const calls = cloudTalkData?.calls ?? [];
-
-    return calls.filter(
-      (call: any) => getCloudTalkCallUserName(call) === userName
-    );
-  }
-
   const cloudTalkTotals = cloudTalkData?.totals ?? {
     inbound: 0,
     outbound: 0,
-    unknown: 0,
     total: 0,
   };
 
@@ -883,7 +729,7 @@ export default function Dashboard() {
           </CardTitle>
 
           <p className="text-sm text-muted-foreground">
-            Clique em um usuário para ver as chamadas do período.
+            Inbound, outbound e total no período selecionado.
           </p>
         </CardHeader>
 
@@ -925,152 +771,33 @@ export default function Dashboard() {
               </div>
 
               {cloudTalkUsers.length > 0 ? (
-                <div className="space-y-3">
-                  {cloudTalkUsers.map((item) => {
-                    const userCalls = getCloudTalkCallsByUserName(item.user);
-                    const isOpen = cloudTalkUserOpen === item.user;
-
-                    return (
-                      <div
-                        key={item.user}
-                        className="rounded-lg border p-3 space-y-3"
-                      >
-                        <button
-                          className="w-full grid grid-cols-4 gap-3 text-sm text-left"
-                          onClick={() => {
-                            setCloudTalkUserOpen(isOpen ? false : item.user);
-                            setVisibleCloudTalkCalls(50);
-                          }}
-                        >
-                          <div>
-                            <p className="text-muted-foreground">Usuário</p>
-                            <p className="font-semibold">{item.user}</p>
-                          </div>
-
-                          <div>
-                            <p className="text-muted-foreground">Inbound</p>
-                            <p className="font-semibold">{item.inbound}</p>
-                          </div>
-
-                          <div>
-                            <p className="text-muted-foreground">Outbound</p>
-                            <p className="font-semibold">{item.outbound}</p>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <p className="text-muted-foreground">Total</p>
-                              <p className="font-semibold">{item.total}</p>
-                            </div>
-
-                            <ChevronDown
-                              className={`h-4 w-4 transition-transform ${
-                                isOpen ? "rotate-180" : ""
-                              }`}
-                            />
-                          </div>
-                        </button>
-
-                        {isOpen && (
-                          <div className="space-y-2 border-t pt-3">
-                            <p className="text-sm font-medium">
-                              Mostrando{" "}
-                              {Math.min(
-                                visibleCloudTalkCalls,
-                                userCalls.length
-                              )}{" "}
-                              de {userCalls.length} chamadas
-                            </p>
-
-                            {userCalls
-                              .slice(0, visibleCloudTalkCalls)
-                              .map((call: any, index: number) => {
-                                const direction = getCloudTalkDirection(call);
-
-                                return (
-                                  <div
-                                    key={`${item.user}-${index}`}
-                                    className="rounded-lg border bg-background p-3 space-y-2"
-                                  >
-                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                      <div className="flex items-center gap-2">
-                                        {direction === "inbound" ? (
-                                          <PhoneIncoming className="h-4 w-4 text-blue-600" />
-                                        ) : direction === "outbound" ? (
-                                          <PhoneOutgoing className="h-4 w-4 text-green-600" />
-                                        ) : (
-                                          <PhoneCall className="h-4 w-4 text-muted-foreground" />
-                                        )}
-
-                                        <Badge
-                                          className={
-                                            direction === "inbound"
-                                              ? "bg-blue-600"
-                                              : direction === "outbound"
-                                              ? "bg-green-600"
-                                              : "bg-gray-500"
-                                          }
-                                        >
-                                          {getCloudTalkDirectionLabel(call)}
-                                        </Badge>
-
-                                        <Badge variant="outline">
-                                          {getCloudTalkStatus(call)}
-                                        </Badge>
-                                      </div>
-
-                                      <p className="text-xs text-muted-foreground">
-                                        {getCloudTalkCallDate(call)}
-                                      </p>
-                                    </div>
-
-                                    <div className="grid gap-2 sm:grid-cols-3 text-sm">
-                                      <div>
-                                        <p className="text-muted-foreground">
-                                          Número externo
-                                        </p>
-                                        <p className="font-medium">
-                                          {getCloudTalkExternalNumber(call)}
-                                        </p>
-                                      </div>
-
-                                      <div>
-                                        <p className="text-muted-foreground">
-                                          Número interno
-                                        </p>
-                                        <p className="font-medium">
-                                          {getCloudTalkInternalNumber(call)}
-                                        </p>
-                                      </div>
-
-                                      <div>
-                                        <p className="text-muted-foreground">
-                                          Duração
-                                        </p>
-                                        <p className="font-medium">
-                                          {getCloudTalkDuration(call)}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-
-                            {visibleCloudTalkCalls < userCalls.length && (
-                              <Button
-                                variant="outline"
-                                onClick={() =>
-                                  setVisibleCloudTalkCalls((prev) => prev + 50)
-                                }
-                              >
-                                Ver mais
-                              </Button>
-                            )}
-                          </div>
-                        )}
+                <div className="space-y-2">
+                  {cloudTalkUsers.map((item) => (
+                    <div
+                      key={item.user}
+                      className="grid grid-cols-4 gap-3 rounded-lg border p-3 text-sm"
+                    >
+                      <div>
+                        <p className="text-muted-foreground">Usuário</p>
+                        <p className="font-semibold">{item.user}</p>
                       </div>
-                    );
-                  })}
+
+                      <div>
+                        <p className="text-muted-foreground">Inbound</p>
+                        <p className="font-semibold">{item.inbound}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-muted-foreground">Outbound</p>
+                        <p className="font-semibold">{item.outbound}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-muted-foreground">Total</p>
+                        <p className="font-semibold">{item.total}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
