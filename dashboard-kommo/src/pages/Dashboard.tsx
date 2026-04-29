@@ -6,6 +6,7 @@ import {
   ChevronDown,
   DollarSign,
   Loader2,
+  PhoneCall,
   RefreshCw,
   TrendingUp,
   UserCheck,
@@ -19,12 +20,15 @@ import { Button } from "@/components/ui/button";
 
 import { fetchDashboardData, FIELD_IDS } from "@/lib/kommo-api";
 import { isConnected } from "@/lib/kommo-storage";
+import { fetchCloudTalkCallsByUser } from "@/lib/cloudtalk-api";
+import { isCloudTalkConnected } from "@/lib/cloudtalk-storage";
 import { useNavigate } from "react-router-dom";
 import type { KommoLead } from "@/types/kommo";
 
 const ATENDENTES = ["Ana Paula", "Rayanne"];
 
 type DashboardData = Awaited<ReturnType<typeof fetchDashboardData>>;
+type CloudTalkData = Awaited<ReturnType<typeof fetchCloudTalkCallsByUser>>;
 
 function getFieldValueById(lead: KommoLead, fieldId: number): string | null {
   const field = lead.custom_fields_values?.find(
@@ -53,6 +57,7 @@ function toInputDate(date: Date) {
 
 function dateInputToUnixStart(value: string) {
   const [year, month, day] = value.split("-").map(Number);
+
   return Math.floor(
     new Date(year, month - 1, day, 0, 0, 0, 0).getTime() / 1000
   );
@@ -60,6 +65,7 @@ function dateInputToUnixStart(value: string) {
 
 function dateInputToUnixEnd(value: string) {
   const [year, month, day] = value.split("-").map(Number);
+
   return Math.floor(
     new Date(year, month - 1, day, 23, 59, 59, 999).getTime() / 1000
   );
@@ -98,7 +104,9 @@ function uniqueLeads(leads: KommoLead[]) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const connected = isConnected();
+
+  const kommoConnected = isConnected();
+  const cloudTalkConnected = isCloudTalkConnected();
 
   const defaultRange = getDefaultSevenDaysRange();
 
@@ -107,9 +115,14 @@ export default function Dashboard() {
   const [allTime, setAllTime] = useState(false);
 
   const [data, setData] = useState<DashboardData | null>(null);
+  const [cloudTalkData, setCloudTalkData] = useState<CloudTalkData | null>(
+    null
+  );
+
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [cloudTalkError, setCloudTalkError] = useState<string | null>(null);
 
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
@@ -129,21 +142,42 @@ export default function Dashboard() {
     : dateInputToUnixEnd(dateToInput || dateFromInput);
 
   async function loadDashboard() {
-    if (!connected) {
+    if (!kommoConnected) {
       setIsLoading(false);
       return;
     }
 
     try {
       setError(null);
+      setCloudTalkError(null);
       setIsFetching(true);
 
-      const result = await fetchDashboardData({
+      const kommoResult = await fetchDashboardData({
         date_from: dateFrom,
         date_to: dateTo,
       });
 
-      setData(result);
+      setData(kommoResult);
+
+      if (cloudTalkConnected) {
+        try {
+          const cloudTalkResult = await fetchCloudTalkCallsByUser({
+            date_from: dateFrom,
+            date_to: dateTo,
+          });
+
+          setCloudTalkData(cloudTalkResult);
+        } catch (err) {
+          setCloudTalkData(null);
+          setCloudTalkError(
+            err instanceof Error
+              ? err.message
+              : "Erro ao buscar chamadas da CloudTalk"
+          );
+        }
+      } else {
+        setCloudTalkData(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err : new Error("Erro desconhecido"));
     } finally {
@@ -154,7 +188,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboard();
-  }, [connected, dateFrom, dateTo]);
+  }, [kommoConnected, cloudTalkConnected, dateFrom, dateTo]);
 
   function resetLists() {
     setVisibleLeads(100);
@@ -189,7 +223,7 @@ export default function Dashboard() {
     return `${formatDateBR(dateFromInput)} até ${formatDateBR(dateToInput)}`;
   }
 
-  if (!connected) {
+  if (!kommoConnected) {
     return (
       <div className="p-6">
         <Card>
@@ -512,12 +546,22 @@ export default function Dashboard() {
     );
   }
 
+  const cloudTalkTotals = cloudTalkData?.totals ?? {
+    inbound: 0,
+    outbound: 0,
+    total: 0,
+  };
+
+  const cloudTalkUsers = cloudTalkData?.callsByUser ?? [];
+
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Dash Euro</h1>
-          <p className="text-muted-foreground">Euro Implantes — Kommo CRM</p>
+          <p className="text-muted-foreground">
+            Euro Implantes — Kommo CRM + CloudTalk
+          </p>
         </div>
 
         <Button onClick={loadDashboard} disabled={isFetching} className="gap-2">
@@ -538,6 +582,7 @@ export default function Dashboard() {
                 <CalendarDays className="h-4 w-4" />
                 Filtro de período
               </p>
+
               <p className="text-xs text-muted-foreground">
                 Padrão: últimos 7 dias.
               </p>
@@ -675,6 +720,94 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PhoneCall className="h-5 w-5" />
+            CloudTalk — Chamadas por usuário
+          </CardTitle>
+
+          <p className="text-sm text-muted-foreground">
+            Inbound, outbound e total no período selecionado.
+          </p>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          {!cloudTalkConnected && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              CloudTalk ainda não está conectada. Vá em Integrações e salve as
+              chaves da CloudTalk.
+            </div>
+          )}
+
+          {cloudTalkError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              Erro CloudTalk: {cloudTalkError}
+            </div>
+          )}
+
+          {cloudTalkConnected && !cloudTalkError && (
+            <>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border p-4">
+                  <p className="text-sm text-muted-foreground">Inbound</p>
+                  <p className="text-2xl font-bold">
+                    {cloudTalkTotals.inbound}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border p-4">
+                  <p className="text-sm text-muted-foreground">Outbound</p>
+                  <p className="text-2xl font-bold">
+                    {cloudTalkTotals.outbound}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border p-4">
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="text-2xl font-bold">{cloudTalkTotals.total}</p>
+                </div>
+              </div>
+
+              {cloudTalkUsers.length > 0 ? (
+                <div className="space-y-2">
+                  {cloudTalkUsers.map((item) => (
+                    <div
+                      key={item.user}
+                      className="grid grid-cols-4 gap-3 rounded-lg border p-3 text-sm"
+                    >
+                      <div>
+                        <p className="text-muted-foreground">Usuário</p>
+                        <p className="font-semibold">{item.user}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-muted-foreground">Inbound</p>
+                        <p className="font-semibold">{item.inbound}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-muted-foreground">Outbound</p>
+                        <p className="font-semibold">{item.outbound}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-muted-foreground">Total</p>
+                        <p className="font-semibold">{item.total}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma chamada encontrada no período.
+                </p>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {leadsOpen && (
         <Card>
