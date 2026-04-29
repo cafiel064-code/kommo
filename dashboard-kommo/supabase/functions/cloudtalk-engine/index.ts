@@ -29,8 +29,8 @@ async function cloudTalkFetch(
   accessKeyId: string,
   accessKeySecret: string,
   path: string
-): Promise<{ ok: boolean; status: number; data: any; text: string }> {
-  const url = `https://api.cloudtalk.io/v1${path}`;
+): Promise<{ ok: boolean; status: number; data: any; text: string; path: string }> {
+  const url = `https://my.cloudtalk.io/api${path}`;
 
   try {
     const res = await fetch(url, {
@@ -56,6 +56,7 @@ async function cloudTalkFetch(
       status: res.status,
       data,
       text,
+      path,
     };
   } catch (e) {
     return {
@@ -63,29 +64,54 @@ async function cloudTalkFetch(
       status: 0,
       data: null,
       text: `Erro de rede: ${e instanceof Error ? e.message : String(e)}`,
+      path,
     };
   }
 }
 
 function extractCalls(data: any): any[] {
-  if (Array.isArray(data)) return data;
+  const possibleArrays = [
+    data,
+    data?.data,
+    data?.calls,
+    data?.responseData,
+    data?.responseData?.data,
+    data?.responseData?.calls,
+    data?.response?.data,
+    data?.response?.calls,
+    data?._embedded?.calls,
+    data?.result,
+    data?.result?.data,
+    data?.result?.calls,
+  ];
 
-  if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.calls)) return data.calls;
-  if (Array.isArray(data?.response?.data)) return data.response.data;
-  if (Array.isArray(data?._embedded?.calls)) return data._embedded.calls;
+  for (const item of possibleArrays) {
+    if (Array.isArray(item)) return item;
+  }
 
   return [];
 }
 
+function getCdr(call: any) {
+  return call?.Cdr ?? call?.cdr ?? call;
+}
+
 function getCallDate(call: any): number {
+  const cdr = getCdr(call);
+
   const candidates = [
-    call?.started_at,
-    call?.start_time,
-    call?.created_at,
-    call?.date,
-    call?.timestamp,
-    call?.call_started_at,
+    cdr?.started_at,
+    cdr?.start_time,
+    cdr?.created_at,
+    cdr?.date,
+    cdr?.timestamp,
+    cdr?.call_started_at,
+    cdr?.startedAt,
+    cdr?.createdAt,
+    cdr?.created,
+    cdr?.started,
+    cdr?.calldate,
+    cdr?.call_date,
   ];
 
   for (const candidate of candidates) {
@@ -96,6 +122,7 @@ function getCallDate(call: any): number {
     }
 
     const parsed = Date.parse(String(candidate));
+
     if (!Number.isNaN(parsed)) {
       return Math.floor(parsed / 1000);
     }
@@ -105,45 +132,88 @@ function getCallDate(call: any): number {
 }
 
 function normalizeDirection(call: any): "inbound" | "outbound" | "unknown" {
-  const raw = String(
-    call?.direction ||
-      call?.call_direction ||
-      call?.type ||
-      call?.call_type ||
-      ""
-  ).toLowerCase();
+  const cdr = getCdr(call);
 
-  if (raw.includes("inbound") || raw.includes("incoming")) return "inbound";
-  if (raw.includes("outbound") || raw.includes("outgoing")) return "outbound";
+  const raw = String(
+    cdr?.direction ||
+      cdr?.call_direction ||
+      cdr?.type ||
+      cdr?.call_type ||
+      cdr?.callType ||
+      cdr?.direction_type ||
+      cdr?.directionType ||
+      cdr?.callDirection ||
+      cdr?.call_direction_type ||
+      ""
+  )
+    .toLowerCase()
+    .trim();
+
+  if (
+    raw.includes("incoming") ||
+    raw.includes("inbound") ||
+    raw === "incoming" ||
+    raw === "inbound" ||
+    raw === "in" ||
+    raw === "1"
+  ) {
+    return "inbound";
+  }
+
+  if (
+    raw.includes("outgoing") ||
+    raw.includes("outbound") ||
+    raw === "outgoing" ||
+    raw === "outbound" ||
+    raw === "out" ||
+    raw === "2"
+  ) {
+    return "outbound";
+  }
 
   return "unknown";
 }
 
 function getUserName(call: any): string {
+  const cdr = getCdr(call);
+
   const candidates = [
+    call?.User?.name,
+    call?.User?.full_name,
+    call?.User?.email,
     call?.user?.name,
+    call?.user?.full_name,
+    call?.user?.email,
+
+    call?.Agent?.name,
+    call?.Agent?.full_name,
+    call?.Agent?.email,
     call?.agent?.name,
-    call?.operator?.name,
-    call?.answered_by?.name,
-    call?.created_by?.name,
-    call?.user_name,
-    call?.agent_name,
-    call?.operator_name,
-    call?.assigned_agent_name,
-    call?.owner?.name,
+    call?.agent?.full_name,
+    call?.agent?.email,
+
+    cdr?.user_name,
+    cdr?.user_full_name,
+    cdr?.user_email,
+    cdr?.agent_name,
+    cdr?.agent_full_name,
+    cdr?.agent_email,
+    cdr?.operator_name,
+    cdr?.employee_name,
   ];
 
   for (const candidate of candidates) {
-    if (candidate && String(candidate).trim()) {
+    if (
+      candidate &&
+      typeof candidate !== "object" &&
+      String(candidate).trim()
+    ) {
       return String(candidate).trim();
     }
   }
 
-  if (Array.isArray(call?.users) && call.users.length > 0) {
-    const user = call.users[0];
-
-    if (user?.name) return String(user.name).trim();
-    if (user?.email) return String(user.email).trim();
+  if (cdr?.user_id) {
+    return `Usuário #${cdr.user_id}`;
   }
 
   return "Usuário não identificado";
@@ -156,19 +226,23 @@ async function fetchCalls(
   dateTo: number
 ) {
   const allCalls: any[] = [];
-  const limit = 100;
   const maxPages = 100;
 
-  const fromIso = new Date(dateFrom * 1000).toISOString();
-  const toIso = new Date(dateTo * 1000).toISOString();
+  const dateFromIso = new Date(dateFrom * 1000).toISOString().slice(0, 10);
+  const dateToIso = new Date(dateTo * 1000).toISOString().slice(0, 10);
+
+  let firstResponseDebug: any = null;
+  let endpointUsed = "";
 
   for (let page = 1; page <= maxPages; page++) {
     const paths = [
-      `/calls?limit=${limit}&page=${page}&date_from=${encodeURIComponent(
-        fromIso
-      )}&date_to=${encodeURIComponent(toIso)}`,
-      `/calls?limit=${limit}&page=${page}&from=${dateFrom}&to=${dateTo}`,
-      `/calls?limit=${limit}&page=${page}`,
+      `/calls/index.json?page=${page}&per_page=100&date_from=${dateFromIso}&date_to=${dateToIso}`,
+      `/calls/index.json?page=${page}&limit=100&date_from=${dateFromIso}&date_to=${dateToIso}`,
+      `/calls/index.json?page=${page}&per_page=100&from=${dateFromIso}&to=${dateToIso}`,
+      `/calls/index.json?page=${page}&limit=100&from=${dateFromIso}&to=${dateToIso}`,
+      `/calls/index.json?page=${page}&per_page=100&from=${dateFrom}&to=${dateTo}`,
+      `/calls/index.json?page=${page}&limit=100&from=${dateFrom}&to=${dateTo}`,
+      `/calls/index.json?page=${page}`,
     ];
 
     let pageCalls: any[] = [];
@@ -176,6 +250,18 @@ async function fetchCalls(
 
     for (const path of paths) {
       const res = await cloudTalkFetch(accessKeyId, accessKeySecret, path);
+
+      if (!firstResponseDebug) {
+        firstResponseDebug = {
+          path: res.path,
+          status: res.status,
+          topLevelKeys: res.data ? Object.keys(res.data) : [],
+          responseDataKeys: res.data?.responseData
+            ? Object.keys(res.data.responseData)
+            : [],
+          sampleRaw: JSON.stringify(res.data).slice(0, 2500),
+        };
+      }
 
       if (!res.ok || !res.data) {
         lastError = `CloudTalk erro (${res.status}): ${res.text.substring(
@@ -186,7 +272,9 @@ async function fetchCalls(
       }
 
       pageCalls = extractCalls(res.data);
-      break;
+      endpointUsed = path;
+
+      if (pageCalls.length > 0) break;
     }
 
     if (pageCalls.length === 0) {
@@ -199,16 +287,22 @@ async function fetchCalls(
 
     allCalls.push(...pageCalls);
 
-    if (pageCalls.length < limit) break;
+    if (pageCalls.length < 50) break;
   }
 
-  return allCalls.filter((call) => {
+  const filteredCalls = allCalls.filter((call) => {
     const callDate = getCallDate(call);
 
     if (!callDate) return true;
 
     return callDate >= dateFrom && callDate <= dateTo;
   });
+
+  return {
+    calls: filteredCalls,
+    firstResponseDebug,
+    endpointUsed,
+  };
 }
 
 function buildCallsByUser(calls: any[]) {
@@ -218,6 +312,7 @@ function buildCallsByUser(calls: any[]) {
       user: string;
       inbound: number;
       outbound: number;
+      unknown: number;
       total: number;
     }
   > = {};
@@ -231,22 +326,38 @@ function buildCallsByUser(calls: any[]) {
         user,
         inbound: 0,
         outbound: 0,
+        unknown: 0,
         total: 0,
       };
     }
 
     if (direction === "inbound") {
       byUser[user].inbound += 1;
-    }
-
-    if (direction === "outbound") {
+    } else if (direction === "outbound") {
       byUser[user].outbound += 1;
+    } else {
+      byUser[user].unknown += 1;
     }
 
     byUser[user].total += 1;
   }
 
   return Object.values(byUser).sort((a, b) => b.total - a.total);
+}
+
+function getCallSampleDebug(calls: any[]) {
+  return calls.slice(0, 3).map((call) => {
+    const cdr = getCdr(call);
+
+    return {
+      keys: Object.keys(call),
+      cdrKeys: cdr ? Object.keys(cdr) : [],
+      userDetected: getUserName(call),
+      directionDetected: normalizeDirection(call),
+      dateDetected: getCallDate(call),
+      raw: JSON.stringify(call).slice(0, 1500),
+    };
+  });
 }
 
 serve(async (req) => {
@@ -275,19 +386,21 @@ serve(async (req) => {
       const dateFrom = body.date_from ?? now - 7 * 24 * 60 * 60;
       const dateTo = body.date_to ?? now;
 
-      const calls = await fetchCalls(
+      const fetchResult = await fetchCalls(
         access_key_id,
         access_key_secret,
         dateFrom,
         dateTo
       );
 
+      const calls = fetchResult.calls;
       const callsByUser = buildCallsByUser(calls);
 
       const totals = callsByUser.reduce(
         (acc, item) => {
           acc.inbound += item.inbound;
           acc.outbound += item.outbound;
+          acc.unknown += item.unknown;
           acc.total += item.total;
 
           return acc;
@@ -295,6 +408,7 @@ serve(async (req) => {
         {
           inbound: 0,
           outbound: 0,
+          unknown: 0,
           total: 0,
         }
       );
@@ -305,7 +419,15 @@ serve(async (req) => {
         callsByUser,
         totals,
         totalFetched: calls.length,
-        debug: `${calls.length} chamadas encontradas. ${callsByUser.length} usuários encontrados.`,
+        endpointUsed: fetchResult.endpointUsed,
+        firstResponseDebug: fetchResult.firstResponseDebug,
+        callSampleDebug: getCallSampleDebug(calls),
+        debug:
+          `${calls.length} chamadas encontradas. ` +
+          `${callsByUser.length} usuários encontrados. ` +
+          `Inbound: ${totals.inbound}. ` +
+          `Outbound: ${totals.outbound}. ` +
+          `Unknown: ${totals.unknown}.`,
       });
     }
 
