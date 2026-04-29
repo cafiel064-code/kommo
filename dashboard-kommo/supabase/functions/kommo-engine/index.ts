@@ -274,19 +274,19 @@ function normalizeText(value: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function getVendaStatusInfo(
-  pipelines: any[]
+function getStatusInfoByName(
+  pipelines: any[],
+  targetName: string
 ): { pipelineId: number; statusId: number; statusName: string } | null {
+  const target = normalizeText(targetName);
+
   for (const pipeline of pipelines) {
     const statuses = pipeline._embedded?.statuses ?? [];
 
     for (const status of statuses) {
       const statusName = normalizeText(status.name);
 
-      if (
-        statusName === "VENDA REALIZADA" ||
-        statusName.includes("VENDA REALIZADA")
-      ) {
+      if (statusName === target || statusName.includes(target)) {
         return {
           pipelineId: Number(pipeline.id),
           statusId: Number(status.id),
@@ -302,15 +302,10 @@ function getVendaStatusInfo(
 function deepFindStatusId(obj: any): number | null {
   if (!obj || typeof obj !== "object") return null;
 
-  if (typeof obj.id !== "undefined" && String(obj.name || "").length > 0) {
-    return Number(obj.id);
-  }
-
   const possibleKeys = [
     "status_id",
     "lead_status_id",
     "pipeline_status_id",
-    "id",
   ];
 
   for (const key of possibleKeys) {
@@ -391,22 +386,11 @@ async function saveLeadSnapshots(leads: any[]) {
   }
 }
 
-function getUniqueLeadsById(leads: any[]): any[] {
-  const map = new Map<number, any>();
-
-  for (const lead of leads) {
-    if (!lead?.id) continue;
-    map.set(Number(lead.id), lead);
-  }
-
-  return Array.from(map.values());
-}
-
-function getUniqueVendaEvents(vendaEvents: any[]): any[] {
+function getUniqueEventsByLeadId(events: any[]): any[] {
   const seenLeadIds = new Set<number>();
   const uniqueEvents: any[] = [];
 
-  for (const event of vendaEvents) {
+  for (const event of events) {
     const leadId = Number(event.entity_id);
 
     if (!leadId || seenLeadIds.has(leadId)) continue;
@@ -416,6 +400,17 @@ function getUniqueVendaEvents(vendaEvents: any[]): any[] {
   }
 
   return uniqueEvents;
+}
+
+function getUniqueLeadsById(leads: any[]): any[] {
+  const map = new Map<number, any>();
+
+  for (const lead of leads) {
+    if (!lead?.id) continue;
+    map.set(Number(lead.id), lead);
+  }
+
+  return Array.from(map.values());
 }
 
 function leadDentroDoPeriodo(lead: any, dateFrom: number, dateTo: number) {
@@ -428,7 +423,11 @@ function leadDentroDoPeriodo(lead: any, dateFrom: number, dateTo: number) {
   );
 }
 
-function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
+function computeRealKPIs(
+  leads: any[],
+  vendasUsadas: any[],
+  agendadosUsados: any[]
+) {
   const leadsCriados = leads.length;
 
   const totalVendas = vendasUsadas.reduce((acc: number, lead: any) => {
@@ -453,6 +452,7 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
       leads: number;
       vendas: number;
       valor: number;
+      agendamentos: number;
       naoCompareceu: number;
       compareceu: number;
     }
@@ -467,6 +467,7 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
         leads: 0,
         vendas: 0,
         valor: 0,
+        agendamentos: 0,
         naoCompareceu: 0,
         compareceu: 0,
       };
@@ -492,6 +493,7 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
         leads: 0,
         vendas: 0,
         valor: 0,
+        agendamentos: 0,
         naoCompareceu: 0,
         compareceu: 0,
       };
@@ -499,6 +501,24 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
 
     porResponsavel[responsavel].vendas += 1;
     porResponsavel[responsavel].valor += Number(lead.price || 0);
+  }
+
+  for (const lead of agendadosUsados) {
+    const responsavel =
+      getFieldValueById(lead, FIELD_IDS.RESPONSAVEL) || "Sem responsável";
+
+    if (!porResponsavel[responsavel]) {
+      porResponsavel[responsavel] = {
+        leads: 0,
+        vendas: 0,
+        valor: 0,
+        agendamentos: 0,
+        naoCompareceu: 0,
+        compareceu: 0,
+      };
+    }
+
+    porResponsavel[responsavel].agendamentos += 1;
   }
 
   const taxaConversao =
@@ -510,6 +530,7 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
     leadsCriados,
     totalLeads: leadsCriados,
     vendasQuantidade: vendasUsadas.length,
+    agendamentosQuantidade: agendadosUsados.length,
     totalVendas,
     taxaConversao,
     compareceu,
@@ -517,6 +538,7 @@ function computeRealKPIs(leads: any[], vendasUsadas: any[]) {
     acompanhandoComparecimento,
     porResponsavel,
     vendasPorEventoQuantidade: vendasUsadas.length,
+    agendamentosPorEventoQuantidade: agendadosUsados.length,
     followUpsPorResponsavel: {},
     tempoMedioResposta: null,
   };
@@ -623,12 +645,18 @@ serve(async (req) => {
         fetchStatusEvents(subdomain, api_token, dateFrom, dateTo),
       ]);
 
-      const vendaStatusInfo = getVendaStatusInfo(pipelines);
+      const vendaStatusInfo = getStatusInfoByName(
+        pipelines,
+        "VENDA REALIZADA"
+      );
 
-      if (!vendaStatusInfo) {
+      const agendadoStatusInfo = getStatusInfoByName(pipelines, "AGENDADO");
+
+      if (!vendaStatusInfo || !agendadoStatusInfo) {
         return jsonResponse({
           success: false,
-          error: "Etapa Venda Realizada não encontrada nos funis da Kommo.",
+          error:
+            "Etapa Venda Realizada ou Agendado não encontrada nos funis da Kommo.",
           pipelinesDebug: pipelines.map((pipeline: any) => ({
             pipeline_id: pipeline.id,
             pipeline_name: pipeline.name,
@@ -640,20 +668,30 @@ serve(async (req) => {
         });
       }
 
-      const vendaEvents = statusEvents.filter((event: any) => {
-        const statusAfter = getLeadStatusAfter(event);
-        return Number(statusAfter) === Number(vendaStatusInfo.statusId);
-      });
-
-      const vendaEventsUnique = getUniqueVendaEvents(vendaEvents);
-
       const leadMap = new Map<number, any>();
 
       leadsResult.leads.forEach((lead: any) => {
         leadMap.set(Number(lead.id), lead);
       });
 
+      const vendaEvents = statusEvents.filter((event: any) => {
+        const statusAfter = getLeadStatusAfter(event);
+        return Number(statusAfter) === Number(vendaStatusInfo.statusId);
+      });
+
+      const agendadoEvents = statusEvents.filter((event: any) => {
+        const statusAfter = getLeadStatusAfter(event);
+        return Number(statusAfter) === Number(agendadoStatusInfo.statusId);
+      });
+
+      const vendaEventsUnique = getUniqueEventsByLeadId(vendaEvents);
+      const agendadoEventsUnique = getUniqueEventsByLeadId(agendadoEvents);
+
       const vendaLeadsPorEvento = vendaEventsUnique
+        .map((event: any) => leadMap.get(Number(event.entity_id)))
+        .filter(Boolean);
+
+      const agendadoLeadsPorEvento = agendadoEventsUnique
         .map((event: any) => leadMap.get(Number(event.entity_id)))
         .filter(Boolean);
 
@@ -664,7 +702,18 @@ serve(async (req) => {
         vendaStatusInfo.statusId
       );
 
+      const agendadoLeadsPorStatus = await fetchLeadsByStatus(
+        subdomain,
+        api_token,
+        agendadoStatusInfo.pipelineId,
+        agendadoStatusInfo.statusId
+      );
+
       const vendaLeadsPorStatusNoPeriodo = vendaLeadsPorStatus.filter(
+        (lead: any) => leadDentroDoPeriodo(lead, dateFrom, dateTo)
+      );
+
+      const agendadoLeadsPorStatusNoPeriodo = agendadoLeadsPorStatus.filter(
         (lead: any) => leadDentroDoPeriodo(lead, dateFrom, dateTo)
       );
 
@@ -673,15 +722,22 @@ serve(async (req) => {
           ? vendaLeadsPorEvento
           : vendaLeadsPorStatusNoPeriodo;
 
+      const agendadosUsados =
+        agendadoLeadsPorEvento.length > 0
+          ? agendadoLeadsPorEvento
+          : agendadoLeadsPorStatusNoPeriodo;
+
       const vendasUnicas = getUniqueLeadsById(vendasUsadas);
+      const agendadosUnicos = getUniqueLeadsById(agendadosUsados);
 
       const totalVendas = vendasUnicas.reduce((acc: number, lead: any) => {
         return acc + Number(lead.price || 0);
       }, 0);
 
       const kpis = {
-        ...computeRealKPIs(leadsResult.leads, vendasUnicas),
+        ...computeRealKPIs(leadsResult.leads, vendasUnicas, agendadosUnicos),
         vendasQuantidade: vendasUnicas.length,
+        agendamentosQuantidade: agendadosUnicos.length,
         totalVendas,
       };
 
@@ -703,22 +759,43 @@ serve(async (req) => {
         vendaPipelineId: vendaStatusInfo.pipelineId,
         vendaStatusName: vendaStatusInfo.statusName,
 
+        agendadoStatusId: agendadoStatusInfo.statusId,
+        agendadoPipelineId: agendadoStatusInfo.pipelineId,
+        agendadoStatusName: agendadoStatusInfo.statusName,
+
         vendaEvents,
         vendaEventsUnique,
         vendaEventsQuantidade: vendaEvents.length,
         vendaEventsUnicosQuantidade: vendaEventsUnique.length,
 
+        agendadoEvents,
+        agendadoEventsUnique,
+        agendadoEventsQuantidade: agendadoEvents.length,
+        agendadoEventsUnicosQuantidade: agendadoEventsUnique.length,
+
         vendaLeadsPorEvento,
         vendaLeadsPorEventoQuantidade: vendaLeadsPorEvento.length,
 
+        agendadoLeadsPorEvento,
+        agendadoLeadsPorEventoQuantidade: agendadoLeadsPorEvento.length,
+
         vendaLeadsPorStatus,
         vendaLeadsPorStatusQuantidade: vendaLeadsPorStatus.length,
+
+        agendadoLeadsPorStatus,
+        agendadoLeadsPorStatusQuantidade: agendadoLeadsPorStatus.length,
 
         vendaLeadsPorStatusNoPeriodo,
         vendaLeadsPorStatusNoPeriodoQuantidade:
           vendaLeadsPorStatusNoPeriodo.length,
 
+        agendadoLeadsPorStatusNoPeriodo,
+        agendadoLeadsPorStatusNoPeriodoQuantidade:
+          agendadoLeadsPorStatusNoPeriodo.length,
+
         vendaLeads: vendasUnicas,
+        agendadoLeads: agendadosUnicos,
+
         totalFetched: leadsResult.leads.length,
 
         statusEventsQuantidade: statusEvents.length,
@@ -726,14 +803,15 @@ serve(async (req) => {
         statusIdsEncontrados,
 
         totalVendas,
+        agendadoQuantidade: agendadosUnicos.length,
 
         debug:
           `${leadsResult.debug} | ` +
           `eventos de status encontrados: ${statusEvents.length} | ` +
           `vendaStatusId: ${vendaStatusInfo.statusId} | ` +
-          `vendas por evento: ${vendaLeadsPorEvento.length} | ` +
-          `vendas por status no período: ${vendaLeadsPorStatusNoPeriodo.length} | ` +
+          `agendadoStatusId: ${agendadoStatusInfo.statusId} | ` +
           `vendas usadas: ${vendasUnicas.length} | ` +
+          `agendados usados: ${agendadosUnicos.length} | ` +
           `total vendas: ${totalVendas}`,
       });
     }

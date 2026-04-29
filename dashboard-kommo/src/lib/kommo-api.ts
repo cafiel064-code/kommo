@@ -14,7 +14,9 @@ async function callEngine(
 ): Promise<KommoEngineResponse> {
   const creds = getCredentials();
 
-  if (!creds) throw new Error("Sem credenciais Kommo configuradas");
+  if (!creds) {
+    throw new Error("Sem credenciais Kommo configuradas");
+  }
 
   if (!isSupabaseConfigured()) {
     throw new Error(
@@ -100,6 +102,8 @@ export async function fetchDashboardData(params?: {
   totalFetched: number;
   vendaEvents: any[];
   vendaLeads: KommoLead[];
+  agendadoEvents: any[];
+  agendadoLeads: KommoLead[];
   totalVendas: number;
 }> {
   const res = await callEngine("crm_data", {
@@ -118,6 +122,8 @@ export async function fetchDashboardData(params?: {
     totalFetched: (res as any).totalFetched ?? 0,
     vendaEvents: ((res as any).vendaEvents ?? []) as any[],
     vendaLeads: ((res as any).vendaLeads ?? []) as KommoLead[],
+    agendadoEvents: ((res as any).agendadoEvents ?? []) as any[],
+    agendadoLeads: ((res as any).agendadoLeads ?? []) as KommoLead[],
     totalVendas: Number((res as any).totalVendas ?? 0),
   };
 }
