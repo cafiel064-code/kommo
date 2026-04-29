@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -52,23 +52,19 @@ function toInputDate(date: Date) {
 
 function dateInputToUnixStart(value: string) {
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
-
-  return Math.floor(date.getTime() / 1000);
+  return Math.floor(new Date(year, month - 1, day, 0, 0, 0, 0).getTime() / 1000);
 }
 
 function dateInputToUnixEnd(value: string) {
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day, 23, 59, 59, 999);
-
-  return Math.floor(date.getTime() / 1000);
+  return Math.floor(
+    new Date(year, month - 1, day, 23, 59, 59, 999).getTime() / 1000
+  );
 }
 
 function formatDateBR(value: string) {
   if (!value) return "";
-
   const [year, month, day] = value.split("-");
-
   return `${day}/${month}/${year}`;
 }
 
@@ -82,6 +78,16 @@ function getDefaultSevenDaysRange() {
     from: toInputDate(seteDiasAtras),
     to: toInputDate(hoje),
   };
+}
+
+function uniqueLeads(leads: KommoLead[]) {
+  const map = new Map<number, KommoLead>();
+
+  for (const lead of leads) {
+    map.set(Number(lead.id), lead);
+  }
+
+  return Array.from(map.values());
 }
 
 export default function Dashboard() {
@@ -152,7 +158,6 @@ export default function Dashboard() {
 
   function periodoLabel() {
     if (allTime) return "Toda existência do CRM";
-
     return `${formatDateBR(dateFromInput)} até ${formatDateBR(dateToInput)}`;
   }
 
@@ -259,31 +264,13 @@ export default function Dashboard() {
     agendadoLeadIds.has(Number(lead.id))
   );
 
-  const vendasBase =
-    vendasPorEvento.length > 0 ? vendasPorEvento : vendaLeadsBackend;
+  const vendas = uniqueLeads(
+    vendasPorEvento.length > 0 ? vendasPorEvento : vendaLeadsBackend
+  );
 
-  const agendadosBase =
-    agendadosPorEvento.length > 0 ? agendadosPorEvento : agendadoLeadsBackend;
-
-  const vendas = useMemo(() => {
-    const map = new Map<number, KommoLead>();
-
-    for (const lead of vendasBase) {
-      map.set(Number(lead.id), lead);
-    }
-
-    return Array.from(map.values());
-  }, [vendasBase]);
-
-  const agendados = useMemo(() => {
-    const map = new Map<number, KommoLead>();
-
-    for (const lead of agendadosBase) {
-      map.set(Number(lead.id), lead);
-    }
-
-    return Array.from(map.values());
-  }, [agendadosBase]);
+  const agendados = uniqueLeads(
+    agendadosPorEvento.length > 0 ? agendadosPorEvento : agendadoLeadsBackend
+  );
 
   const totalVendasValor = vendas.reduce(
     (acc, lead) => acc + Number(lead.price || 0),
@@ -424,19 +411,14 @@ export default function Dashboard() {
     return (
       <div className="flex flex-wrap gap-1">
         {responsavel && <Badge variant="outline">{responsavel}</Badge>}
-
         {agendado && <Badge className="bg-purple-600">Agendado</Badge>}
-
         {venda && <Badge className="bg-green-600">Venda realizada</Badge>}
-
         {comparecimento === "Sim" && (
           <Badge className="bg-blue-600">Compareceu</Badge>
         )}
-
         {comparecimento === "Não" && (
           <Badge variant="destructive">Não compareceu</Badge>
         )}
-
         {comparecimento === "Acompanhando" && (
           <Badge variant="secondary">Acompanhando</Badge>
         )}
@@ -511,8 +493,7 @@ export default function Dashboard() {
                 Filtro de período
               </p>
               <p className="text-xs text-muted-foreground">
-                Padrão: últimos 7 dias. Use o calendário para escolher outro
-                período.
+                Padrão: últimos 7 dias.
               </p>
             </div>
 
@@ -547,25 +528,15 @@ export default function Dashboard() {
                 />
               </div>
 
-              <Button
-                variant="outline"
-                onClick={aplicarUltimosSeteDias}
-                className="h-9"
-              >
+              <Button variant="outline" onClick={aplicarUltimosSeteDias}>
                 Últimos 7 dias
               </Button>
 
-              <Button
-                variant="outline"
-                onClick={aplicarTodaExistencia}
-                className="h-9"
-              >
+              <Button variant="outline" onClick={aplicarTodaExistencia}>
                 Toda existência
               </Button>
 
-              <Button onClick={() => refetch()} className="h-9">
-                Aplicar
-              </Button>
+              <Button onClick={() => refetch()}>Aplicar</Button>
             </div>
           </div>
 
@@ -576,40 +547,22 @@ export default function Dashboard() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <Card
-          className="cursor-pointer"
-          onClick={() => {
-            setLeadsOpen(!leadsOpen);
-            setVendasOpen(false);
-            setAgendadosOpen(false);
-            setNaoCompareceuOpen(false);
-            setVisibleLeads(100);
-          }}
-        >
+        <Card className="cursor-pointer" onClick={() => setLeadsOpen(!leadsOpen)}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Users className="h-5 w-5" />
               Leads no período
             </CardTitle>
           </CardHeader>
-
           <CardContent>
             <p className="text-3xl font-bold">{leads.length}</p>
-            <p className="text-sm text-muted-foreground">
-              Leads criados conforme calendário
-            </p>
+            <p className="text-sm text-muted-foreground">Leads criados</p>
           </CardContent>
         </Card>
 
         <Card
           className="cursor-pointer"
-          onClick={() => {
-            setAgendadosOpen(!agendadosOpen);
-            setLeadsOpen(false);
-            setVendasOpen(false);
-            setNaoCompareceuOpen(false);
-            setVisibleAgendados(100);
-          }}
+          onClick={() => setAgendadosOpen(!agendadosOpen)}
         >
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -617,32 +570,19 @@ export default function Dashboard() {
               Agendados
             </CardTitle>
           </CardHeader>
-
           <CardContent>
             <p className="text-3xl font-bold">{agendados.length}</p>
-            <p className="text-sm text-muted-foreground">
-              Movidos para Agendado
-            </p>
+            <p className="text-sm text-muted-foreground">Movidos para Agendado</p>
           </CardContent>
         </Card>
 
-        <Card
-          className="cursor-pointer"
-          onClick={() => {
-            setVendasOpen(!vendasOpen);
-            setLeadsOpen(false);
-            setAgendadosOpen(false);
-            setNaoCompareceuOpen(false);
-            setVisibleVendas(100);
-          }}
-        >
+        <Card className="cursor-pointer" onClick={() => setVendasOpen(!vendasOpen)}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <DollarSign className="h-5 w-5" />
               Vendas
             </CardTitle>
           </CardHeader>
-
           <CardContent>
             <p className="text-3xl font-bold">{vendas.length}</p>
             <p className="text-sm text-green-600">
@@ -653,13 +593,7 @@ export default function Dashboard() {
 
         <Card
           className="cursor-pointer"
-          onClick={() => {
-            setNaoCompareceuOpen(!naoCompareceuOpen);
-            setLeadsOpen(false);
-            setVendasOpen(false);
-            setAgendadosOpen(false);
-            setVisibleNaoCompareceu(100);
-          }}
+          onClick={() => setNaoCompareceuOpen(!naoCompareceuOpen)}
         >
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -667,12 +601,9 @@ export default function Dashboard() {
               Não compareceu
             </CardTitle>
           </CardHeader>
-
           <CardContent>
             <p className="text-3xl font-bold">{naoCompareceu.length}</p>
-            <p className="text-sm text-muted-foreground">
-              No período selecionado
-            </p>
+            <p className="text-sm text-muted-foreground">No período</p>
           </CardContent>
         </Card>
 
@@ -683,7 +614,6 @@ export default function Dashboard() {
               Conversão
             </CardTitle>
           </CardHeader>
-
           <CardContent>
             <p className="text-3xl font-bold">{taxaConversao}%</p>
             <p className="text-sm text-muted-foreground">
@@ -697,20 +627,14 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length}{" "}
-              leads
+              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length} leads
             </CardTitle>
           </CardHeader>
-
           <CardContent className="space-y-4">
             {renderLeadList(leads, visibleLeads)}
-
             {visibleLeads < leads.length && (
-              <Button
-                variant="outline"
-                onClick={() => setVisibleLeads((prev) => prev + 100)}
-              >
-                Ver mais ({Math.min(100, leads.length - visibleLeads)} leads)
+              <Button variant="outline" onClick={() => setVisibleLeads((prev) => prev + 100)}>
+                Ver mais
               </Button>
             )}
           </CardContent>
@@ -725,27 +649,21 @@ export default function Dashboard() {
               {agendados.length} agendamentos
             </CardTitle>
           </CardHeader>
-
           <CardContent className="space-y-4">
             {agendados.length > 0 ? (
               <>
                 {renderLeadList(agendados, visibleAgendados, "agendado")}
-
                 {visibleAgendados < agendados.length && (
                   <Button
                     variant="outline"
                     onClick={() => setVisibleAgendados((prev) => prev + 100)}
                   >
-                    Ver mais (
-                    {Math.min(100, agendados.length - visibleAgendados)}{" "}
-                    agendamentos)
+                    Ver mais
                   </Button>
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground">
-                Nenhum agendamento no período selecionado.
-              </p>
+              <p className="text-muted-foreground">Nenhum agendamento no período.</p>
             )}
           </CardContent>
         </Card>
@@ -755,30 +673,21 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleVendas, vendas.length)} de{" "}
-              {vendas.length} vendas
+              Mostrando {Math.min(visibleVendas, vendas.length)} de {vendas.length} vendas
             </CardTitle>
           </CardHeader>
-
           <CardContent className="space-y-4">
             {vendas.length > 0 ? (
               <>
                 {renderLeadList(vendas, visibleVendas, "venda")}
-
                 {visibleVendas < vendas.length && (
-                  <Button
-                    variant="outline"
-                    onClick={() => setVisibleVendas((prev) => prev + 100)}
-                  >
-                    Ver mais ({Math.min(100, vendas.length - visibleVendas)}{" "}
-                    vendas)
+                  <Button variant="outline" onClick={() => setVisibleVendas((prev) => prev + 100)}>
+                    Ver mais
                   </Button>
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground">
-                Nenhuma venda no período selecionado.
-              </p>
+              <p className="text-muted-foreground">Nenhuma venda no período.</p>
             )}
           </CardContent>
         </Card>
@@ -788,35 +697,26 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)}{" "}
-              de {naoCompareceu.length} leads que não compareceram
+              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)} de{" "}
+              {naoCompareceu.length}
             </CardTitle>
           </CardHeader>
-
           <CardContent className="space-y-4">
             {naoCompareceu.length > 0 ? (
               <>
                 {renderLeadList(naoCompareceu, visibleNaoCompareceu)}
-
                 {visibleNaoCompareceu < naoCompareceu.length && (
                   <Button
                     variant="outline"
-                    onClick={() =>
-                      setVisibleNaoCompareceu((prev) => prev + 100)
-                    }
+                    onClick={() => setVisibleNaoCompareceu((prev) => prev + 100)}
                   >
-                    Ver mais (
-                    {Math.min(
-                      100,
-                      naoCompareceu.length - visibleNaoCompareceu
-                    )}{" "}
-                    leads)
+                    Ver mais
                   </Button>
                 )}
               </>
             ) : (
               <p className="text-muted-foreground">
-                Nenhum lead marcado como “Não compareceu” no período.
+                Nenhum lead marcado como “Não compareceu”.
               </p>
             )}
           </CardContent>
@@ -829,7 +729,6 @@ export default function Dashboard() {
             <UserCheck className="h-5 w-5" />
             Performance por Atendente
           </CardTitle>
-
           <p className="text-sm text-muted-foreground">
             Leads, agendamentos, vendas e valor vendido por responsável
           </p>
@@ -848,9 +747,7 @@ export default function Dashboard() {
                 <button
                   className="w-full flex items-center justify-between text-left"
                   onClick={() => {
-                    setResponsavelOpen(
-                      responsavelOpen === nome ? false : nome
-                    );
+                    setResponsavelOpen(responsavelOpen === nome ? false : nome);
                     setVisibleResponsavel(100);
                   }}
                 >
@@ -867,9 +764,7 @@ export default function Dashboard() {
                 <div className="grid grid-cols-4 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Agendamentos</p>
-                    <p className="font-semibold">
-                      {dados.agendamentos.length}
-                    </p>
+                    <p className="font-semibold">{dados.agendamentos.length}</p>
                   </div>
 
                   <div>
@@ -879,16 +774,12 @@ export default function Dashboard() {
 
                   <div>
                     <p className="text-muted-foreground">Valor</p>
-                    <p className="font-semibold">
-                      {formatCurrency(dados.valor)}
-                    </p>
+                    <p className="font-semibold">{formatCurrency(dados.valor)}</p>
                   </div>
 
                   <div>
                     <p className="text-muted-foreground">Faltas</p>
-                    <p className="font-semibold">
-                      {dados.naoCompareceu.length}
-                    </p>
+                    <p className="font-semibold">{dados.naoCompareceu.length}</p>
                   </div>
                 </div>
 
@@ -896,9 +787,8 @@ export default function Dashboard() {
                   <div className="space-y-4 pt-3">
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle className="h-4 w-4 text-green-600" />
-                      {dados.leads.length} leads ·{" "}
-                      {dados.agendamentos.length} agendamentos ·{" "}
-                      {dados.vendas.length} vendas ·{" "}
+                      {dados.leads.length} leads · {dados.agendamentos.length}{" "}
+                      agendamentos · {dados.vendas.length} vendas ·{" "}
                       {formatCurrency(dados.valor)}
                     </div>
 
@@ -907,16 +797,9 @@ export default function Dashboard() {
                     {visibleResponsavel < dados.leads.length && (
                       <Button
                         variant="outline"
-                        onClick={() =>
-                          setVisibleResponsavel((prev) => prev + 100)
-                        }
+                        onClick={() => setVisibleResponsavel((prev) => prev + 100)}
                       >
-                        Ver mais (
-                        {Math.min(
-                          100,
-                          dados.leads.length - visibleResponsavel
-                        )}{" "}
-                        leads)
+                        Ver mais
                       </Button>
                     )}
                   </div>
