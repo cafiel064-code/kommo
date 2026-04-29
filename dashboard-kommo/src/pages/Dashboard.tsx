@@ -1,39 +1,46 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useNavigate } from "react-router-dom";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
 import {
-  Loader2,
   AlertCircle,
-  RefreshCw,
-  ArrowRight,
-  Zap,
-  Users,
+  CalendarIcon,
+  CheckCircle,
   ChevronDown,
   DollarSign,
-  UserCheck,
-  XCircle,
+  Loader2,
+  RefreshCw,
   TrendingUp,
-  CheckCircle,
+  UserCheck,
+  Users,
+  XCircle,
 } from "lucide-react";
-import { fetchDashboardData } from "@/lib/kommo-api";
+
+import { fetchDashboardData, FIELD_IDS } from "@/lib/kommo-api";
 import { isConnected } from "@/lib/kommo-storage";
-import { useNavigate } from "react-router-dom";
 import type { KommoLead } from "@/types/kommo";
 
-const FIELD_IDS = {
-  VENDA: 1724504,
-  COMPARECEU: 1724498,
-  RESPONSAVEL: 1790641,
-};
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 const ATENDENTES = ["Ana Paula", "Rayanne"];
 
 function getFieldValueById(lead: KommoLead, fieldId: number): string | null {
-  const field = lead.custom_fields_values?.find((f: any) => f.field_id === fieldId);
+  const field = lead.custom_fields_values?.find(
+    (f: any) => Number(f.field_id) === Number(fieldId)
+  );
+
   const value = field?.values?.[0]?.value;
+
   return value ? String(value).trim() : null;
 }
 
@@ -44,11 +51,49 @@ function formatCurrency(value: number) {
   });
 }
 
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function endOfDay(date: Date) {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+}
+
+function toUnix(date: Date) {
+  return Math.floor(date.getTime() / 1000);
+}
+
+function getCalendarLabel(dateRange: DateRange | undefined) {
+  if (!dateRange?.from && !dateRange?.to) {
+    return "Toda existência do CRM";
+  }
+
+  if (dateRange?.from && !dateRange?.to) {
+    return format(dateRange.from, "dd/MM/yyyy", { locale: ptBR });
+  }
+
+  if (dateRange?.from && dateRange?.to) {
+    return `${format(dateRange.from, "dd/MM/yyyy", {
+      locale: ptBR,
+    })} até ${format(dateRange.to, "dd/MM/yyyy", { locale: ptBR })}`;
+  }
+
+  return "Selecionar período";
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const connected = isConnected();
 
-  const [filtro, setFiltro] = useState<"hoje" | "ontem" | "7d" | "30d" | "todos">("todos");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
   const [naoCompareceuOpen, setNaoCompareceuOpen] = useState(false);
@@ -59,47 +104,84 @@ export default function Dashboard() {
   const [visibleNaoCompareceu, setVisibleNaoCompareceu] = useState(100);
   const [visibleResponsavel, setVisibleResponsavel] = useState(100);
 
+  const dateFrom = dateRange?.from ? toUnix(startOfDay(dateRange.from)) : 0;
+
+  const dateTo = dateRange?.to
+    ? toUnix(endOfDay(dateRange.to))
+    : dateRange?.from
+    ? toUnix(endOfDay(dateRange.from))
+    : Math.floor(Date.now() / 1000);
+
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["dashboard-data"],
-    queryFn: fetchDashboardData,
+    queryKey: ["dashboard-data", dateFrom, dateTo],
+    queryFn: () =>
+      fetchDashboardData({
+        date_from: dateFrom,
+        date_to: dateTo,
+      }),
     enabled: connected,
     retry: 1,
     staleTime: 2 * 60 * 1000,
   });
 
+  function resetLists() {
+    setVisibleLeads(100);
+    setVisibleVendas(100);
+    setVisibleNaoCompareceu(100);
+    setVisibleResponsavel(100);
+    setLeadsOpen(false);
+    setVendasOpen(false);
+    setNaoCompareceuOpen(false);
+    setResponsavelOpen(false);
+  }
+
   if (!connected) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <Zap className="w-10 h-10 text-psi-wine" />
-        <h2 className="text-xl font-bold">Conecte sua Kommo</h2>
-        <Button onClick={() => navigate("/integracoes")} className="bg-primary text-primary-foreground">
-          <ArrowRight className="w-4 h-4 mr-2" />
-          Ir para Integrações
-        </Button>
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <h2 className="text-xl font-semibold">Conecte sua Kommo</h2>
+            <p className="text-muted-foreground">
+              Configure suas credenciais para carregar o dashboard.
+            </p>
+            <Button
+              onClick={() => navigate("/integracoes")}
+              className="bg-primary text-primary-foreground"
+            >
+              Ir para Integrações
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <Loader2 className="w-10 h-10 text-psi-wine animate-spin" />
-        <p className="text-muted-foreground">Carregando dados da Kommo...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Carregando dados da Kommo...
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <AlertCircle className="w-10 h-10 text-destructive" />
-        <p className="text-sm text-muted-foreground">
-          {error instanceof Error ? error.message : "Erro"}
-        </p>
-        <Button onClick={() => refetch()} variant="outline">
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Tentar novamente
-        </Button>
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              <strong>Erro ao carregar dashboard</strong>
+            </div>
+            <p>{error instanceof Error ? error.message : "Erro"}</p>
+            <Button onClick={() => refetch()} variant="outline">
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -108,64 +190,49 @@ export default function Dashboard() {
 
   const allLeads: KommoLead[] = data.leads ?? [];
   const vendaEvents = (data as any).vendaEvents ?? [];
+  const vendaLeadsBackend = ((data as any).vendaLeads ?? []) as KommoLead[];
 
-  function filterByCreatedAt(lead: KommoLead): boolean {
+  function leadInSelectedPeriod(lead: KommoLead): boolean {
     if (!lead.created_at) return false;
 
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const createdAt = lead.created_at * 1000;
+    const createdAt = Number(lead.created_at);
 
-    switch (filtro) {
-      case "hoje":
-        return createdAt >= todayStart.getTime();
-      case "ontem": {
-        const ontemStart = todayStart.getTime() - 86400000;
-        return createdAt >= ontemStart && createdAt < todayStart.getTime();
-      }
-      case "7d":
-        return createdAt >= todayStart.getTime() - 7 * 86400000;
-      case "30d":
-        return createdAt >= todayStart.getTime() - 30 * 86400000;
-      default:
-        return true;
-    }
+    return createdAt >= dateFrom && createdAt <= dateTo;
   }
 
-  function eventInPeriod(event: any): boolean {
+  function eventInSelectedPeriod(event: any): boolean {
     if (!event.created_at) return false;
 
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const eventAt = event.created_at * 1000;
+    const eventAt = Number(event.created_at);
 
-    switch (filtro) {
-      case "hoje":
-        return eventAt >= todayStart.getTime();
-      case "ontem": {
-        const ontemStart = todayStart.getTime() - 86400000;
-        return eventAt >= ontemStart && eventAt < todayStart.getTime();
-      }
-      case "7d":
-        return eventAt >= todayStart.getTime() - 7 * 86400000;
-      case "30d":
-        return eventAt >= todayStart.getTime() - 30 * 86400000;
-      default:
-        return true;
-    }
+    return eventAt >= dateFrom && eventAt <= dateTo;
   }
 
-  const leads = filtro === "todos" ? allLeads : allLeads.filter(filterByCreatedAt);
+  const leads = allLeads.filter(leadInSelectedPeriod);
 
-  const vendaEventsFiltrados = vendaEvents.filter(eventInPeriod);
+  const vendaEventsFiltrados = vendaEvents.filter(eventInSelectedPeriod);
 
   const vendaLeadIds = new Set(
-    vendaEventsFiltrados.map((event: any) => event.entity_id)
+    vendaEventsFiltrados.map((event: any) => Number(event.entity_id))
   );
 
-  const vendas = allLeads.filter((lead) => vendaLeadIds.has(lead.id));
+  const vendasPorEvento = allLeads.filter((lead) =>
+    vendaLeadIds.has(Number(lead.id))
+  );
 
-  const totalVendasValor = vendas.reduce(
+  const vendas = vendasPorEvento.length > 0 ? vendasPorEvento : vendaLeadsBackend;
+
+  const vendasUnicas = useMemo(() => {
+    const map = new Map<number, KommoLead>();
+
+    for (const lead of vendas) {
+      map.set(Number(lead.id), lead);
+    }
+
+    return Array.from(map.values());
+  }, [vendas]);
+
+  const totalVendasValor = vendasUnicas.reduce(
     (acc, lead) => acc + Number(lead.price || 0),
     0
   );
@@ -175,10 +242,14 @@ export default function Dashboard() {
   );
 
   const taxaConversao =
-    leads.length > 0 ? Math.round((vendas.length / leads.length) * 100) : 0;
+    leads.length > 0
+      ? Math.round((vendasUnicas.length / leads.length) * 100)
+      : 0;
 
   function getVendaEventByLeadId(leadId: number) {
-    return vendaEventsFiltrados.find((event: any) => event.entity_id === leadId);
+    return vendaEventsFiltrados.find(
+      (event: any) => Number(event.entity_id) === Number(leadId)
+    );
   }
 
   function leadDate(lead: KommoLead) {
@@ -188,10 +259,12 @@ export default function Dashboard() {
   }
 
   function vendaDate(lead: KommoLead) {
-    const vendaEvent = getVendaEventByLeadId(lead.id);
+    const vendaEvent = getVendaEventByLeadId(Number(lead.id));
 
     return vendaEvent?.created_at
       ? new Date(vendaEvent.created_at * 1000).toLocaleString("pt-BR")
+      : lead.updated_at
+      ? new Date(lead.updated_at * 1000).toLocaleString("pt-BR")
       : leadDate(lead);
   }
 
@@ -234,7 +307,7 @@ export default function Dashboard() {
     }
   }
 
-  for (const lead of vendas) {
+  for (const lead of vendasUnicas) {
     const responsavel =
       getFieldValueById(lead, FIELD_IDS.RESPONSAVEL) || "Sem responsável";
 
@@ -252,75 +325,57 @@ export default function Dashboard() {
   }
 
   function renderLeadBadges(lead: KommoLead) {
-    const venda = vendaLeadIds.has(lead.id);
+    const venda = vendasUnicas.some((item) => Number(item.id) === Number(lead.id));
     const comparecimento = getFieldValueById(lead, FIELD_IDS.COMPARECEU);
     const responsavel = getFieldValueById(lead, FIELD_IDS.RESPONSAVEL);
 
     return (
-      <div className="flex gap-1 flex-wrap">
-        {responsavel && (
-          <Badge className="bg-purple-100 text-purple-700 text-[10px]">
-            {responsavel}
-          </Badge>
-        )}
-
-        {venda && (
-          <Badge className="bg-green-100 text-green-700 text-[10px]">
-            Venda realizada
-          </Badge>
-        )}
-
+      <div className="flex flex-wrap gap-1">
+        {responsavel && <Badge variant="outline">{responsavel}</Badge>}
+        {venda && <Badge className="bg-green-600">Venda realizada</Badge>}
         {comparecimento === "Sim" && (
-          <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">
-            Compareceu
-          </Badge>
+          <Badge className="bg-blue-600">Compareceu</Badge>
         )}
-
         {comparecimento === "Não" && (
-          <Badge className="bg-red-100 text-red-700 text-[10px]">
-            Não compareceu
-          </Badge>
+          <Badge variant="destructive">Não compareceu</Badge>
         )}
-
         {comparecimento === "Acompanhando" && (
-          <Badge className="bg-amber-100 text-amber-700 text-[10px]">
-            Acompanhando
-          </Badge>
+          <Badge variant="secondary">Acompanhando</Badge>
         )}
       </div>
     );
   }
 
-  function renderLeadList(list: KommoLead[], visible: number, mode: "lead" | "venda" = "lead") {
+  function renderLeadList(
+    list: KommoLead[],
+    visible: number,
+    mode: "lead" | "venda" = "lead"
+  ) {
     return (
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {list.slice(0, visible).map((lead) => (
           <div
             key={lead.id}
-            className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm hover:bg-muted/50"
+            className="rounded-lg border bg-background p-3 flex flex-col gap-2"
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-medium truncate max-w-[120px] sm:max-w-[220px]">
-                {lead.name || `Lead #${lead.id}`}
-              </span>
-              {renderLeadBadges(lead)}
-            </div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-medium">{lead.name || `Lead #${lead.id}`}</p>
+                <p className="text-xs text-muted-foreground">#{lead.id}</p>
+              </div>
 
-            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-shrink-0">
               {lead.price > 0 && (
-                <span className="font-medium text-green-600">
+                <p className="font-semibold text-green-600">
                   {formatCurrency(lead.price)}
-                </span>
+                </p>
               )}
-
-              <span>
-                {mode === "venda" ? `Venda: ${vendaDate(lead)}` : leadDate(lead)}
-              </span>
-
-              <span className="text-[10px] text-muted-foreground/50">
-                #{lead.id}
-              </span>
             </div>
+
+            {renderLeadBadges(lead)}
+
+            <p className="text-xs text-muted-foreground">
+              {mode === "venda" ? `Venda: ${vendaDate(lead)}` : leadDate(lead)}
+            </p>
           </div>
         ))}
       </div>
@@ -328,55 +383,76 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Dash Euro</h1>
-          <p className="text-muted-foreground text-xs sm:text-sm">
-            Euro Implantes — Kommo CRM
-          </p>
+          <h1 className="text-2xl font-bold">Dash Euro</h1>
+          <p className="text-muted-foreground">Euro Implantes — Kommo CRM</p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Tabs
-            value={filtro}
-            onValueChange={(v) => {
-              setFiltro(v as typeof filtro);
-              setVisibleLeads(100);
-              setVisibleVendas(100);
-              setVisibleNaoCompareceu(100);
-              setVisibleResponsavel(100);
-              setLeadsOpen(false);
-              setVendasOpen(false);
-              setNaoCompareceuOpen(false);
-              setResponsavelOpen(false);
-            }}
-          >
-            <TabsList className="h-8 sm:h-9">
-              <TabsTrigger value="hoje" className="text-[10px] sm:text-xs px-2 sm:px-3">Hoje</TabsTrigger>
-              <TabsTrigger value="ontem" className="text-[10px] sm:text-xs px-2 sm:px-3">Ontem</TabsTrigger>
-              <TabsTrigger value="7d" className="text-[10px] sm:text-xs px-2 sm:px-3">7d</TabsTrigger>
-              <TabsTrigger value="30d" className="text-[10px] sm:text-xs px-2 sm:px-3">30d</TabsTrigger>
-              <TabsTrigger value="todos" className="text-[10px] sm:text-xs px-2 sm:px-3">Todos</TabsTrigger>
-            </TabsList>
-          </Tabs>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="justify-start gap-2">
+                <CalendarIcon className="h-4 w-4" />
+                {getCalendarLabel(dateRange)}
+              </Button>
+            </PopoverTrigger>
+
+            <PopoverContent className="w-auto p-3" align="end">
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={(range) => {
+                  setDateRange(range);
+                  resetLists();
+                }}
+                numberOfMonths={2}
+                locale={ptBR}
+                initialFocus
+              />
+
+              <div className="flex justify-between gap-2 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDateRange(undefined);
+                    resetLists();
+                  }}
+                >
+                  Toda existência
+                </Button>
+
+                <Button size="sm" onClick={() => refetch()}>
+                  Aplicar
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
 
           <Button
-            size="sm"
-            variant="outline"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="h-8 sm:h-9 px-2 sm:px-3"
+            className="gap-2"
           >
-            <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
-            <span className="hidden sm:inline ml-2">Atualizar</span>
+            {isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Atualizar
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="text-sm text-muted-foreground">
+        Período selecionado: <strong>{getCalendarLabel(dateRange)}</strong>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card
-          className="border-2 border-psi-wine/20 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer"
           onClick={() => {
             setLeadsOpen(!leadsOpen);
             setVendasOpen(false);
@@ -384,31 +460,22 @@ export default function Dashboard() {
             setVisibleLeads(100);
           }}
         >
-          <CardContent className="pt-3 pb-3 px-3 sm:pt-5 sm:pb-4 sm:px-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-psi-wine/10 flex items-center justify-center">
-                  <Users className="w-6 h-6 text-psi-wine" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Leads no período
-                  </p>
-                  <p className="text-2xl sm:text-4xl font-bold text-psi-wine">
-                    {leads.length}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Leads criados conforme filtro
-                  </p>
-                </div>
-              </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${leadsOpen ? "rotate-180" : ""}`} />
-            </div>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-5 w-5" />
+              Leads no período
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{leads.length}</p>
+            <p className="text-sm text-muted-foreground">
+              Leads criados conforme calendário
+            </p>
           </CardContent>
         </Card>
 
         <Card
-          className="border-2 border-green-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer"
           onClick={() => {
             setVendasOpen(!vendasOpen);
             setLeadsOpen(false);
@@ -416,31 +483,22 @@ export default function Dashboard() {
             setVisibleVendas(100);
           }}
         >
-          <CardContent className="pt-3 pb-3 px-3 sm:pt-5 sm:pb-4 sm:px-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-green-50 flex items-center justify-center">
-                  <DollarSign className="w-6 h-6 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Vendas
-                  </p>
-                  <p className="text-2xl sm:text-4xl font-bold text-green-600">
-                    {vendas.length}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {formatCurrency(totalVendasValor)}
-                  </p>
-                </div>
-              </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${vendasOpen ? "rotate-180" : ""}`} />
-            </div>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <DollarSign className="h-5 w-5" />
+              Vendas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{vendasUnicas.length}</p>
+            <p className="text-sm text-green-600">
+              {formatCurrency(totalVendasValor)}
+            </p>
           </CardContent>
         </Card>
 
         <Card
-          className="border-2 border-red-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer"
           onClick={() => {
             setNaoCompareceuOpen(!naoCompareceuOpen);
             setLeadsOpen(false);
@@ -448,104 +506,84 @@ export default function Dashboard() {
             setVisibleNaoCompareceu(100);
           }}
         >
-          <CardContent className="pt-3 pb-3 px-3 sm:pt-5 sm:pb-4 sm:px-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-red-50 flex items-center justify-center">
-                  <XCircle className="w-6 h-6 text-red-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Não compareceu
-                  </p>
-                  <p className="text-2xl sm:text-4xl font-bold text-red-600">
-                    {naoCompareceu.length}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    No período selecionado
-                  </p>
-                </div>
-              </div>
-              <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${naoCompareceuOpen ? "rotate-180" : ""}`} />
-            </div>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <XCircle className="h-5 w-5" />
+              Não compareceu
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{naoCompareceu.length}</p>
+            <p className="text-sm text-muted-foreground">
+              No período selecionado
+            </p>
           </CardContent>
         </Card>
 
-        <Card className="border-2 border-emerald-200 shadow-sm">
-          <CardContent className="pt-3 pb-3 px-3 sm:pt-5 sm:pb-4 sm:px-5">
-            <div className="flex items-center gap-4">
-              <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-emerald-50 flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Conversão
-                </p>
-                <p className="text-2xl sm:text-4xl font-bold text-emerald-600">
-                  {taxaConversao}%
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {vendas.length} vendas de {leads.length} leads
-                </p>
-              </div>
-            </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-5 w-5" />
+              Conversão
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{taxaConversao}%</p>
+            <p className="text-sm text-muted-foreground">
+              {vendasUnicas.length} vendas de {leads.length} leads
+            </p>
           </CardContent>
         </Card>
       </div>
 
       {leadsOpen && (
-        <Card className="border border-border shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">
-              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length} leads
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length}{" "}
+              leads
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             {renderLeadList(leads, visibleLeads)}
 
             {visibleLeads < leads.length && (
-              <div className="flex justify-center pt-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setVisibleLeads((prev) => prev + 100)}
-                  className="text-psi-wine border-psi-wine/30 hover:bg-psi-wine-light"
-                >
-                  Ver mais ({Math.min(100, leads.length - visibleLeads)} leads)
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                onClick={() => setVisibleLeads((prev) => prev + 100)}
+              >
+                Ver mais ({Math.min(100, leads.length - visibleLeads)} leads)
+              </Button>
             )}
           </CardContent>
         </Card>
       )}
 
       {vendasOpen && (
-        <Card className="border border-green-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-green-700">
-              Mostrando {Math.min(visibleVendas, vendas.length)} de {vendas.length} vendas
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Mostrando {Math.min(visibleVendas, vendasUnicas.length)} de{" "}
+              {vendasUnicas.length} vendas
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {vendas.length > 0 ? (
+          <CardContent className="space-y-4">
+            {vendasUnicas.length > 0 ? (
               <>
-                {renderLeadList(vendas, visibleVendas, "venda")}
+                {renderLeadList(vendasUnicas, visibleVendas, "venda")}
 
-                {visibleVendas < vendas.length && (
-                  <div className="flex justify-center pt-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisibleVendas((prev) => prev + 100)}
-                      className="text-green-600 border-green-200 hover:bg-green-50"
-                    >
-                      Ver mais ({Math.min(100, vendas.length - visibleVendas)} vendas)
-                    </Button>
-                  </div>
+                {visibleVendas < vendasUnicas.length && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setVisibleVendas((prev) => prev + 100)}
+                  >
+                    Ver mais (
+                    {Math.min(100, vendasUnicas.length - visibleVendas)} vendas)
+                  </Button>
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-6">
+              <p className="text-muted-foreground">
                 Nenhuma venda no período selecionado.
               </p>
             )}
@@ -554,33 +592,36 @@ export default function Dashboard() {
       )}
 
       {naoCompareceuOpen && (
-        <Card className="border border-red-200 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-red-700">
-              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)} de{" "}
-              {naoCompareceu.length} leads que não compareceram
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)}{" "}
+              de {naoCompareceu.length} leads que não compareceram
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             {naoCompareceu.length > 0 ? (
               <>
                 {renderLeadList(naoCompareceu, visibleNaoCompareceu)}
 
                 {visibleNaoCompareceu < naoCompareceu.length && (
-                  <div className="flex justify-center pt-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisibleNaoCompareceu((prev) => prev + 100)}
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      Ver mais ({Math.min(100, naoCompareceu.length - visibleNaoCompareceu)} leads)
-                    </Button>
-                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      setVisibleNaoCompareceu((prev) => prev + 100)
+                    }
+                  >
+                    Ver mais (
+                    {Math.min(
+                      100,
+                      naoCompareceu.length - visibleNaoCompareceu
+                    )}{" "}
+                    leads)
+                  </Button>
                 )}
               </>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-6">
+              <p className="text-muted-foreground">
                 Nenhum lead marcado como “Não compareceu” no período.
               </p>
             )}
@@ -588,117 +629,94 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <Card className="border-2 border-border shadow-sm">
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
-              <UserCheck className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <CardTitle className="text-base">Performance por Atendente</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Leads, vendas e valor vendido por responsável
-              </p>
-            </div>
-          </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserCheck className="h-5 w-5" />
+            Performance por Atendente
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Leads, vendas e valor vendido por responsável
+          </p>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {Object.entries(porResponsavel)
-              .filter(([, dados]) => dados.leads.length > 0 || dados.vendas.length > 0)
-              .map(([nome, dados]) => (
-                <div
-                  key={nome}
-                  className="bg-purple-50 border border-purple-200 rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow"
+        <CardContent className="space-y-3">
+          {Object.entries(porResponsavel)
+            .filter(
+              ([, dados]) =>
+                dados.leads.length > 0 || dados.vendas.length > 0
+            )
+            .map(([nome, dados]) => (
+              <div key={nome} className="rounded-lg border p-4 space-y-3">
+                <button
+                  className="w-full flex items-center justify-between text-left"
                   onClick={() => {
-                    setResponsavelOpen(responsavelOpen === nome ? false : nome);
+                    setResponsavelOpen(
+                      responsavelOpen === nome ? false : nome
+                    );
                     setVisibleResponsavel(100);
                   }}
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium text-purple-600 uppercase">
-                        {nome}
-                      </p>
-                      <p className="text-3xl font-bold text-purple-700 mt-1">
-                        {dados.leads.length}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        leads atribuídos
-                      </p>
-                    </div>
-
-                    <ChevronDown className={`w-5 h-5 text-purple-600 transition-transform ${responsavelOpen === nome ? "rotate-180" : ""}`} />
+                  <div>
+                    <p className="font-semibold">{nome}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {dados.leads.length} leads atribuídos
+                    </p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <p className="text-xs text-muted-foreground">Vendas</p>
-                      <p className="font-bold text-green-600">{dados.vendas.length}</p>
-                    </div>
+                  <ChevronDown className="h-4 w-4" />
+                </button>
 
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <p className="text-xs text-muted-foreground">Valor</p>
-                      <p className="font-bold text-green-600 text-xs">
-                        {formatCurrency(dados.valor)}
-                      </p>
-                    </div>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Vendas</p>
+                    <p className="font-semibold">{dados.vendas.length}</p>
+                  </div>
 
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <p className="text-xs text-muted-foreground">Faltas</p>
-                      <p className="font-bold text-red-600">
-                        {dados.naoCompareceu.length}
-                      </p>
-                    </div>
+                  <div>
+                    <p className="text-muted-foreground">Valor</p>
+                    <p className="font-semibold">
+                      {formatCurrency(dados.valor)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-muted-foreground">Faltas</p>
+                    <p className="font-semibold">
+                      {dados.naoCompareceu.length}
+                    </p>
                   </div>
                 </div>
-              ))}
-          </div>
 
-          {Object.entries(porResponsavel).map(([nome, dados]) => {
-            if (responsavelOpen !== nome) return null;
+                {responsavelOpen === nome && (
+                  <div className="space-y-4 pt-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      {dados.leads.length} leads · {dados.vendas.length} vendas
+                      · {formatCurrency(dados.valor)}
+                    </div>
 
-            return (
-              <div key={`lista-${nome}`} className="space-y-1.5 pt-3 border-t">
-                <p className="text-xs font-semibold text-purple-700 mb-2">
-                  {nome}: {dados.leads.length} leads · {dados.vendas.length} vendas ·{" "}
-                  {formatCurrency(dados.valor)}
-                </p>
+                    {renderLeadList(dados.leads, visibleResponsavel)}
 
-                {renderLeadList(dados.leads, visibleResponsavel)}
-
-                {visibleResponsavel < dados.leads.length && (
-                  <div className="flex justify-center pt-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setVisibleResponsavel((prev) => prev + 100)}
-                      className="text-purple-600 border-purple-200 hover:bg-purple-50"
-                    >
-                      Ver mais ({Math.min(100, dados.leads.length - visibleResponsavel)} leads)
-                    </Button>
+                    {visibleResponsavel < dados.leads.length && (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setVisibleResponsavel((prev) => prev + 100)
+                        }
+                      >
+                        Ver mais (
+                        {Math.min(
+                          100,
+                          dados.leads.length - visibleResponsavel
+                        )}{" "}
+                        leads)
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      <Card className="border border-dashed border-muted-foreground/30 shadow-sm">
-        <CardContent className="py-5">
-          <div className="flex items-center gap-3">
-            <CheckCircle className="w-5 h-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">Blocos removidos</p>
-              <p className="text-xs text-muted-foreground">
-                Foram removidos os blocos antigos de IA-PPT, cadência, recuperação,
-                status de reunião e closer antigo. Este painel agora usa apenas os
-                campos reais do CRM Euro.
-              </p>
-            </div>
-          </div>
+            ))}
         </CardContent>
       </Card>
     </div>
