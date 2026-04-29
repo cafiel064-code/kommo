@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -24,6 +23,8 @@ import { useNavigate } from "react-router-dom";
 import type { KommoLead } from "@/types/kommo";
 
 const ATENDENTES = ["Ana Paula", "Rayanne"];
+
+type DashboardData = Awaited<ReturnType<typeof fetchDashboardData>>;
 
 function getFieldValueById(lead: KommoLead, fieldId: number): string | null {
   const field = lead.custom_fields_values?.find(
@@ -52,7 +53,9 @@ function toInputDate(date: Date) {
 
 function dateInputToUnixStart(value: string) {
   const [year, month, day] = value.split("-").map(Number);
-  return Math.floor(new Date(year, month - 1, day, 0, 0, 0, 0).getTime() / 1000);
+  return Math.floor(
+    new Date(year, month - 1, day, 0, 0, 0, 0).getTime() / 1000
+  );
 }
 
 function dateInputToUnixEnd(value: string) {
@@ -64,7 +67,9 @@ function dateInputToUnixEnd(value: string) {
 
 function formatDateBR(value: string) {
   if (!value) return "";
+
   const [year, month, day] = value.split("-");
+
   return `${day}/${month}/${year}`;
 }
 
@@ -83,7 +88,8 @@ function getDefaultSevenDaysRange() {
 function uniqueLeads(leads: KommoLead[]) {
   const map = new Map<number, KommoLead>();
 
-  for (const lead of leads) {
+  for (const lead of leads || []) {
+    if (!lead?.id) continue;
     map.set(Number(lead.id), lead);
   }
 
@@ -99,6 +105,11 @@ export default function Dashboard() {
   const [dateFromInput, setDateFromInput] = useState(defaultRange.from);
   const [dateToInput, setDateToInput] = useState(defaultRange.to);
   const [allTime, setAllTime] = useState(false);
+
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
 
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [vendasOpen, setVendasOpen] = useState(false);
@@ -117,17 +128,33 @@ export default function Dashboard() {
     ? Math.floor(Date.now() / 1000)
     : dateInputToUnixEnd(dateToInput || dateFromInput);
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["dashboard-data", dateFrom, dateTo],
-    queryFn: () =>
-      fetchDashboardData({
+  async function loadDashboard() {
+    if (!connected) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      setError(null);
+      setIsFetching(true);
+
+      const result = await fetchDashboardData({
         date_from: dateFrom,
         date_to: dateTo,
-      }),
-    enabled: connected,
-    retry: 1,
-    staleTime: 2 * 60 * 1000,
-  });
+      });
+
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error("Erro desconhecido"));
+    } finally {
+      setIsLoading(false);
+      setIsFetching(false);
+    }
+  }
+
+  useEffect(() => {
+    loadDashboard();
+  }, [connected, dateFrom, dateTo]);
 
   function resetLists() {
     setVisibleLeads(100);
@@ -158,6 +185,7 @@ export default function Dashboard() {
 
   function periodoLabel() {
     if (allTime) return "Toda existência do CRM";
+
     return `${formatDateBR(dateFromInput)} até ${formatDateBR(dateToInput)}`;
   }
 
@@ -170,6 +198,7 @@ export default function Dashboard() {
             <p className="text-muted-foreground">
               Configure suas credenciais para carregar o dashboard.
             </p>
+
             <Button
               onClick={() => navigate("/integracoes")}
               className="bg-primary text-primary-foreground"
@@ -203,9 +232,9 @@ export default function Dashboard() {
               <strong>Erro ao carregar dashboard</strong>
             </div>
 
-            <p>{error instanceof Error ? error.message : "Erro"}</p>
+            <p>{error.message}</p>
 
-            <Button onClick={() => refetch()} variant="outline">
+            <Button onClick={loadDashboard} variant="outline">
               Tentar novamente
             </Button>
           </CardContent>
@@ -214,7 +243,19 @@ export default function Dashboard() {
     );
   }
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-muted-foreground">
+              Nenhum dado encontrado para o período selecionado.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const allLeads: KommoLead[] = data.leads ?? [];
 
@@ -411,14 +452,19 @@ export default function Dashboard() {
     return (
       <div className="flex flex-wrap gap-1">
         {responsavel && <Badge variant="outline">{responsavel}</Badge>}
+
         {agendado && <Badge className="bg-purple-600">Agendado</Badge>}
+
         {venda && <Badge className="bg-green-600">Venda realizada</Badge>}
+
         {comparecimento === "Sim" && (
           <Badge className="bg-blue-600">Compareceu</Badge>
         )}
+
         {comparecimento === "Não" && (
           <Badge variant="destructive">Não compareceu</Badge>
         )}
+
         {comparecimento === "Acompanhando" && (
           <Badge variant="secondary">Acompanhando</Badge>
         )}
@@ -474,7 +520,7 @@ export default function Dashboard() {
           <p className="text-muted-foreground">Euro Implantes — Kommo CRM</p>
         </div>
 
-        <Button onClick={() => refetch()} disabled={isFetching} className="gap-2">
+        <Button onClick={loadDashboard} disabled={isFetching} className="gap-2">
           {isFetching ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
@@ -536,7 +582,7 @@ export default function Dashboard() {
                 Toda existência
               </Button>
 
-              <Button onClick={() => refetch()}>Aplicar</Button>
+              <Button onClick={loadDashboard}>Aplicar</Button>
             </div>
           </div>
 
@@ -554,6 +600,7 @@ export default function Dashboard() {
               Leads no período
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <p className="text-3xl font-bold">{leads.length}</p>
             <p className="text-sm text-muted-foreground">Leads criados</p>
@@ -570,9 +617,12 @@ export default function Dashboard() {
               Agendados
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <p className="text-3xl font-bold">{agendados.length}</p>
-            <p className="text-sm text-muted-foreground">Movidos para Agendado</p>
+            <p className="text-sm text-muted-foreground">
+              Movidos para Agendado
+            </p>
           </CardContent>
         </Card>
 
@@ -583,6 +633,7 @@ export default function Dashboard() {
               Vendas
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <p className="text-3xl font-bold">{vendas.length}</p>
             <p className="text-sm text-green-600">
@@ -601,6 +652,7 @@ export default function Dashboard() {
               Não compareceu
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <p className="text-3xl font-bold">{naoCompareceu.length}</p>
             <p className="text-sm text-muted-foreground">No período</p>
@@ -614,6 +666,7 @@ export default function Dashboard() {
               Conversão
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <p className="text-3xl font-bold">{taxaConversao}%</p>
             <p className="text-sm text-muted-foreground">
@@ -627,13 +680,19 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length} leads
+              Mostrando {Math.min(visibleLeads, leads.length)} de {leads.length}{" "}
+              leads
             </CardTitle>
           </CardHeader>
+
           <CardContent className="space-y-4">
             {renderLeadList(leads, visibleLeads)}
+
             {visibleLeads < leads.length && (
-              <Button variant="outline" onClick={() => setVisibleLeads((prev) => prev + 100)}>
+              <Button
+                variant="outline"
+                onClick={() => setVisibleLeads((prev) => prev + 100)}
+              >
                 Ver mais
               </Button>
             )}
@@ -649,10 +708,12 @@ export default function Dashboard() {
               {agendados.length} agendamentos
             </CardTitle>
           </CardHeader>
+
           <CardContent className="space-y-4">
             {agendados.length > 0 ? (
               <>
                 {renderLeadList(agendados, visibleAgendados, "agendado")}
+
                 {visibleAgendados < agendados.length && (
                   <Button
                     variant="outline"
@@ -663,7 +724,9 @@ export default function Dashboard() {
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground">Nenhum agendamento no período.</p>
+              <p className="text-muted-foreground">
+                Nenhum agendamento no período.
+              </p>
             )}
           </CardContent>
         </Card>
@@ -673,21 +736,29 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleVendas, vendas.length)} de {vendas.length} vendas
+              Mostrando {Math.min(visibleVendas, vendas.length)} de{" "}
+              {vendas.length} vendas
             </CardTitle>
           </CardHeader>
+
           <CardContent className="space-y-4">
             {vendas.length > 0 ? (
               <>
                 {renderLeadList(vendas, visibleVendas, "venda")}
+
                 {visibleVendas < vendas.length && (
-                  <Button variant="outline" onClick={() => setVisibleVendas((prev) => prev + 100)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setVisibleVendas((prev) => prev + 100)}
+                  >
                     Ver mais
                   </Button>
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground">Nenhuma venda no período.</p>
+              <p className="text-muted-foreground">
+                Nenhuma venda no período.
+              </p>
             )}
           </CardContent>
         </Card>
@@ -697,18 +768,23 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Mostrando {Math.min(visibleNaoCompareceu, naoCompareceu.length)} de{" "}
+              Mostrando{" "}
+              {Math.min(visibleNaoCompareceu, naoCompareceu.length)} de{" "}
               {naoCompareceu.length}
             </CardTitle>
           </CardHeader>
+
           <CardContent className="space-y-4">
             {naoCompareceu.length > 0 ? (
               <>
                 {renderLeadList(naoCompareceu, visibleNaoCompareceu)}
+
                 {visibleNaoCompareceu < naoCompareceu.length && (
                   <Button
                     variant="outline"
-                    onClick={() => setVisibleNaoCompareceu((prev) => prev + 100)}
+                    onClick={() =>
+                      setVisibleNaoCompareceu((prev) => prev + 100)
+                    }
                   >
                     Ver mais
                   </Button>
@@ -729,6 +805,7 @@ export default function Dashboard() {
             <UserCheck className="h-5 w-5" />
             Performance por Atendente
           </CardTitle>
+
           <p className="text-sm text-muted-foreground">
             Leads, agendamentos, vendas e valor vendido por responsável
           </p>
@@ -747,7 +824,9 @@ export default function Dashboard() {
                 <button
                   className="w-full flex items-center justify-between text-left"
                   onClick={() => {
-                    setResponsavelOpen(responsavelOpen === nome ? false : nome);
+                    setResponsavelOpen(
+                      responsavelOpen === nome ? false : nome
+                    );
                     setVisibleResponsavel(100);
                   }}
                 >
@@ -764,7 +843,9 @@ export default function Dashboard() {
                 <div className="grid grid-cols-4 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Agendamentos</p>
-                    <p className="font-semibold">{dados.agendamentos.length}</p>
+                    <p className="font-semibold">
+                      {dados.agendamentos.length}
+                    </p>
                   </div>
 
                   <div>
@@ -774,12 +855,16 @@ export default function Dashboard() {
 
                   <div>
                     <p className="text-muted-foreground">Valor</p>
-                    <p className="font-semibold">{formatCurrency(dados.valor)}</p>
+                    <p className="font-semibold">
+                      {formatCurrency(dados.valor)}
+                    </p>
                   </div>
 
                   <div>
                     <p className="text-muted-foreground">Faltas</p>
-                    <p className="font-semibold">{dados.naoCompareceu.length}</p>
+                    <p className="font-semibold">
+                      {dados.naoCompareceu.length}
+                    </p>
                   </div>
                 </div>
 
@@ -787,8 +872,9 @@ export default function Dashboard() {
                   <div className="space-y-4 pt-3">
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle className="h-4 w-4 text-green-600" />
-                      {dados.leads.length} leads · {dados.agendamentos.length}{" "}
-                      agendamentos · {dados.vendas.length} vendas ·{" "}
+                      {dados.leads.length} leads ·{" "}
+                      {dados.agendamentos.length} agendamentos ·{" "}
+                      {dados.vendas.length} vendas ·{" "}
                       {formatCurrency(dados.valor)}
                     </div>
 
@@ -797,7 +883,9 @@ export default function Dashboard() {
                     {visibleResponsavel < dados.leads.length && (
                       <Button
                         variant="outline"
-                        onClick={() => setVisibleResponsavel((prev) => prev + 100)}
+                        onClick={() =>
+                          setVisibleResponsavel((prev) => prev + 100)
+                        }
                       >
                         Ver mais
                       </Button>
