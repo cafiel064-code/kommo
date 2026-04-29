@@ -123,7 +123,6 @@ async function fetchLeadsByPeriod(
   dateTo: number
 ): Promise<{ leads: any[]; debug: string }> {
   const leadMap = new Map<number, any>();
-
   const limit = 250;
   const maxPages = 200;
 
@@ -180,6 +179,95 @@ async function fetchLeadsByPeriod(
   };
 }
 
+async function fetchStatusEvents(
+  subdomain: string,
+  token: string,
+  dateFrom: number,
+  dateTo: number
+): Promise<any[]> {
+  const events: any[] = [];
+  const limit = 100;
+  const maxPages = 50;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const path = `/events?limit=50`;
+
+    const res = await kommoFetch(subdomain, token, path);
+
+    if (res.status === 204) break;
+    if (!res.ok || !res.data) break;
+
+    const pageEvents = res.data?._embedded?.events ?? [];
+
+    if (pageEvents.length === 0) break;
+
+    events.push(...pageEvents);
+
+    if (pageEvents.length < limit) break;
+  }
+
+  return events;
+}
+
+function getVendaStatusId(pipelines: any[]): number | null {
+  const statuses = pipelines.flatMap((pipeline: any) => {
+    return pipeline._embedded?.statuses ?? [];
+  });
+
+  const found = statuses.find((status: any) => {
+    return String(status.name).trim().toUpperCase() === "VENDA REALIZADA";
+  });
+
+  return found?.id ?? null;
+}
+
+function getLeadStatusAfter(event: any): number | null {
+  try {
+    const valueAfter = event?.value_after;
+
+    if (Array.isArray(valueAfter)) {
+      for (const item of valueAfter) {
+        const statusId =
+          item?.lead_status?.id ??
+          item?.lead_status_id ??
+          item?.status_id ??
+          item?.value?.lead_status?.id ??
+          item?.value?.status_id ??
+          item?.value?.lead_status_id;
+
+        if (statusId) return Number(statusId);
+      }
+    }
+
+    const statusId =
+      valueAfter?.lead_status?.id ??
+      valueAfter?.lead_status_id ??
+      valueAfter?.status_id ??
+      valueAfter?.value?.lead_status?.id ??
+      valueAfter?.value?.status_id ??
+      valueAfter?.value?.lead_status_id ??
+      event?.value?.lead_status?.id ??
+      event?.value?.status_id ??
+      event?.value?.lead_status_id;
+
+    return statusId ? Number(statusId) : null;
+  } catch {
+    return null;
+  }
+}
+
+
+
+function getEventUser(event: any): string {
+  return (
+    event.created_by_name ||
+    event.modified_by_name ||
+    event.author?.name ||
+    event.account?.name ||
+    "Usuário não identificado"
+  );
+}
+
 async function saveLeadSnapshots(leads: any[]) {
   if (leads.length === 0) return;
 
@@ -208,14 +296,36 @@ async function saveLeadSnapshots(leads: any[]) {
   }
 }
 
-function computeRealKPIs(leads: any[]) {
+function computeRealKPIs(leads: any[], vendaEvents: any[] = []) {
   const leadsCriados = leads.length;
 
-  const vendas = leads.filter((lead: any) => {
+  const leadMap = new Map<number, any>();
+  for (const lead of leads) {
+    leadMap.set(lead.id, lead);
+  }
+
+  const vendasPorEventoLeadIds = new Set<number>();
+  const vendaEventsUnique: any[] = [];
+
+  for (const event of vendaEvents) {
+    const leadId = event.entity_id;
+    if (!leadId || vendasPorEventoLeadIds.has(leadId)) continue;
+
+    vendasPorEventoLeadIds.add(leadId);
+    vendaEventsUnique.push(event);
+  }
+
+  const vendasLeads = vendaEventsUnique
+    .map((event) => leadMap.get(event.entity_id))
+    .filter(Boolean);
+
+  const vendasFallback = leads.filter((lead: any) => {
     return getFieldValueById(lead, FIELD_IDS.VENDA) === "Sim";
   });
 
-  const totalVendas = vendas.reduce((acc: number, lead: any) => {
+  const vendasUsadas = vendasLeads.length > 0 ? vendasLeads : vendasFallback;
+
+  const totalVendas = vendasUsadas.reduce((acc: number, lead: any) => {
     return acc + Number(lead.price || 0);
   }, 0);
 
@@ -258,11 +368,6 @@ function computeRealKPIs(leads: any[]) {
 
     porResponsavel[responsavel].leads += 1;
 
-    if (getFieldValueById(lead, FIELD_IDS.VENDA) === "Sim") {
-      porResponsavel[responsavel].vendas += 1;
-      porResponsavel[responsavel].valor += Number(lead.price || 0);
-    }
-
     if (getFieldValueById(lead, FIELD_IDS.COMPARECEU) === "Não") {
       porResponsavel[responsavel].naoCompareceu += 1;
     }
@@ -272,21 +377,40 @@ function computeRealKPIs(leads: any[]) {
     }
   });
 
+  for (const lead of vendasUsadas) {
+    const responsavel =
+      getFieldValueById(lead, FIELD_IDS.RESPONSAVEL) || "Sem responsável";
+
+    if (!porResponsavel[responsavel]) {
+      porResponsavel[responsavel] = {
+        leads: 0,
+        vendas: 0,
+        valor: 0,
+        naoCompareceu: 0,
+        compareceu: 0,
+      };
+    }
+
+    porResponsavel[responsavel].vendas += 1;
+    porResponsavel[responsavel].valor += Number(lead.price || 0);
+  }
+
   const taxaConversao =
     leadsCriados > 0
-      ? Number(((vendas.length / leadsCriados) * 100).toFixed(2))
+      ? Number(((vendasUsadas.length / leadsCriados) * 100).toFixed(2))
       : 0;
 
   return {
     leadsCriados,
     totalLeads: leadsCriados,
-    vendasQuantidade: vendas.length,
+    vendasQuantidade: vendasUsadas.length,
     totalVendas,
     taxaConversao,
     compareceu,
     naoCompareceu,
     acompanhandoComparecimento,
     porResponsavel,
+    vendasPorEventoQuantidade: vendaEventsUnique.length,
     followUpsPorResponsavel: {},
     tempoMedioResposta: null,
   };
@@ -300,6 +424,7 @@ serve(async (req) => {
   try {
     const body: RequestBody = await req.json();
     const { action, subdomain, api_token } = body;
+console.log("ACTION RECEBIDA:", action);
 
     if (!subdomain || !api_token) {
       return jsonResponse(
@@ -378,32 +503,61 @@ serve(async (req) => {
       });
     }
 
-    if (action === "crm_data") {
-      const now = Math.floor(Date.now() / 1000);
-      const defaultStart = 0;
+   if (action === "crm_data") {
+  const now = Math.floor(Date.now() / 1000);
+  const defaultStart = 0;
 
-      const dateFrom = body.date_from ?? defaultStart;
-      const dateTo = body.date_to ?? now;
+  const dateFrom = body.date_from ?? defaultStart;
+  const dateTo = body.date_to ?? now;
 
-      const [leadsResult, pipelines] = await Promise.all([
-        fetchLeadsByPeriod(subdomain, api_token, dateFrom, dateTo),
-        fetchPipelines(subdomain, api_token),
-      ]);
+  const [leadsResult, pipelines, statusEvents] = await Promise.all([
+    fetchLeadsByPeriod(subdomain, api_token, 0, now),
+    fetchPipelines(subdomain, api_token),
+    fetchStatusEvents(subdomain, api_token, dateFrom, dateTo),
+  ]);
 
-      await saveLeadSnapshots(leadsResult.leads);
+  const vendaStatusId = getVendaStatusId(pipelines);
 
-      const kpis = computeRealKPIs(leadsResult.leads);
+  const vendaEvents = vendaStatusId
+    ? statusEvents.filter((event: any) => {
+        return getLeadStatusAfter(event) === vendaStatusId;
+      })
+    : [];
 
-      return jsonResponse({
-        success: true,
-        leads: leadsResult.leads,
-        pipelines,
-        kpis,
-        totalFetched: leadsResult.leads.length,
-        debug: leadsResult.debug,
-      });
-    }
+  const leadMap = new Map<number, any>();
 
+  leadsResult.leads.forEach((lead: any) => {
+    leadMap.set(lead.id, lead);
+  });
+
+  const vendaLeads = vendaEvents
+    .map((event: any) => leadMap.get(event.entity_id))
+    .filter(Boolean);
+
+  const totalVendas = vendaLeads.reduce((acc: number, lead: any) => {
+    return acc + Number(lead.price || 0);
+  }, 0);
+
+  const kpis = {
+    ...computeRealKPIs(leadsResult.leads, vendaEvents),
+    vendasQuantidade: vendaEvents.length,
+    totalVendas,
+  };
+
+  return jsonResponse({
+    success: true,
+    leads: leadsResult.leads,
+    pipelines,
+    kpis,
+    vendaStatusId,
+    vendaEvents,
+    vendaEventsQuantidade: vendaEvents.length,
+    vendaLeads,
+    totalFetched: leadsResult.leads.length,
+    debug: `${leadsResult.debug} | vendas por movimentação: ${vendaEvents.length} | total vendas: ${totalVendas}`,
+  });
+}
+    
     return jsonResponse(
       { success: false, error: `Ação desconhecida: ${action}` },
       400

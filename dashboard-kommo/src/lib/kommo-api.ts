@@ -106,6 +106,7 @@ export async function fetchDashboardData(): Promise<{
   tagDeletedEvents: TagDeletedEvent[];
   tag: string;
   totalFetched: number;
+vendaEvents: any[];
 }> {
   const res = await callEngine("crm_data", { tag: IA_TAG });
   const leads = (res.leads ?? []) as KommoLead[];
@@ -116,7 +117,8 @@ export async function fetchDashboardData(): Promise<{
   const tagDeletedEvents = ((res as any).tagDeletedEvents ?? []) as TagDeletedEvent[];
   const tag = (res as any).tag ?? IA_TAG;
   const totalFetched = (res as any).totalFetched ?? leads.length;
-  return { leads, lostTagLeads, pipelines, kpis: kpis as DashboardKPIs, events, tagDeletedEvents, tag, totalFetched };
+const vendaEvents = ((res as any).vendaEvents ?? []) as any[];
+  return { leads, lostTagLeads, pipelines, kpis: kpis as DashboardKPIs, events, tagDeletedEvents, tag, totalFetched, vendaEvents };
 }
 
 // ── Helpers ──
